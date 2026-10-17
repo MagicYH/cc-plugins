@@ -1,0 +1,15 @@
+{
+  "name": "botmux-extend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "muxboard": "bin/muxboard"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

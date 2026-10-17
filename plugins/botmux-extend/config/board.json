@@ -1,0 +1,18 @@
+{
+  "base_token": "KpbybB1JPaWVtYsB6r8c4UZdnkg",
+  "table_id": "tblqY5Msqv9tDBWI",
+  "fields": {
+    "title": "fldDa07B7G",
+    "desc": "fldW79g4H9",
+    "status": "fldZTEiywf",
+    "priority": "fldLxu5DPC",
+    "owner": "fldPKudYmh",
+    "parent": "fldhZR2aJp",
+    "work_chat": "fldnCfUCxW",
+    "criteria": "fldfuR0nmi",
+    "progress": "fldMc28yQk",
+    "output": "fldgNsHCoP",
+    "updated_at": "fldZfhlB8N",
+    "dispatcher": "fldEuP2QPm"
+  }
+}

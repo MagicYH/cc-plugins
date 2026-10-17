@@ -1,0 +1,8 @@
+{
+  "name": "botmux-extend",
+  "description": "botmux 多 bot 协作任务看板：muxboard 命令行工具和 task-board 技能",
+  "version": "0.1.0",
+  "author": {
+    "name": "magic"
+  }
+}

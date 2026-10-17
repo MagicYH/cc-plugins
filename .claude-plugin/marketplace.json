@@ -1,0 +1,16 @@
+{
+  "name": "cc-plugins",
+  "owner": {
+    "name": "magic"
+  },
+  "metadata": {
+    "description": "Claude Code 插件市场"
+  },
+  "plugins": [
+    {
+      "name": "botmux-extend",
+      "source": "./plugins/botmux-extend",
+      "description": "botmux 多 bot 协作任务看板：muxboard 命令行工具和 task-board 技能"
+    }
+  ]
+}
