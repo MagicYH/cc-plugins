@@ -3,7 +3,8 @@
 // 实测的 lark-cli 行为（2026-10-17）：
 // - 建群：`im +chat-create --name N --description D [--users ou_a,ou_b] [--bots cli_a,cli_b]`
 //   返回 data = { chat_id: "oc_x", name, ... }。--users 最多 50 个，--bots 最多 5 个。
-// - 读群信息：`im chats get --chat-id oc_x`，返回 data.description、data.name。
+// - 读群信息：`im chats get --chat-id oc_x`，返回 data.name、data.description、
+//   data.chat_mode（普通群为 "group"，话题群为 "topic"）、data.group_message_type（"chat" 或话题模式 "thread"）。
 // - 查成员：`im +chat-members-list --chat-id oc_x --page-all`
 //   返回 data = { users: [{member_id: "ou_x", name, ...}], bots: [{app_id: "cli_x", member_id: "ou_y", name}] }。
 //   bots[].member_id 是这个 bot 在调用方应用下的 open_id，@ 时用它。
@@ -19,9 +20,16 @@
  */
 
 /**
+ * @typedef {Object} ChatInfo
+ * @property {string|null} name
+ * @property {string|null} chat_mode           普通群为 "group"
+ * @property {string|null} group_message_type  话题模式为 "thread"
+ */
+
+/**
  * @typedef {Object} Chat
  * @property {(opts: {name: string, description: string, userOpenIds?: string[], botAppIds?: string[]}) => Promise<string>} create  返回 chat_id
- * @property {(chatId: string) => Promise<string>} getDescription  没有描述时返回 ""
+ * @property {(chatId: string) => Promise<ChatInfo>} getInfo
  * @property {(chatId: string) => Promise<ChatMembers>} listMembers
  * @property {(chatId: string, appIds: string[]) => Promise<void>} addBots
  * @property {(chatId: string, text: string) => Promise<string>} send  返回 message_id
@@ -41,9 +49,13 @@ export function createChat(run) {
       return data.chat_id;
     },
 
-    async getDescription(chatId) {
+    async getInfo(chatId) {
       const data = await run(['im', 'chats', 'get', '--chat-id', chatId]);
-      return data.description ?? '';
+      return {
+        name: data.name ?? null,
+        chat_mode: data.chat_mode ?? null,
+        group_message_type: data.group_message_type ?? null,
+      };
     },
 
     async listMembers(chatId) {

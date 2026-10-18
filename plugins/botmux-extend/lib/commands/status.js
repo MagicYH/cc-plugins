@@ -4,7 +4,7 @@ import { MuxError, ErrorCode } from '../errors.js';
 import { requirePositional } from '../args.js';
 import { Status, SETTABLE_STATUSES } from '../constants.js';
 import { formatProgress } from '../progress.js';
-import { mention, parseDescription } from '../workchat.js';
+import { mention } from '../workchat.js';
 
 /** 通知文案里的状态名。进行中不通知，所以不在这里。 */
 const NOTIFY_LABEL = { [Status.DONE]: '已完成', [Status.BLOCKED]: '受阻' };
@@ -44,7 +44,7 @@ export async function run(args, ctx) {
 
 /**
  * 返回 {chatId, text}；没有通知对象时返回 null。
- * 子任务：通知父任务的负责人 bot。根任务：通知工作群描述里记的上级群，并 @ 派发人。
+ * 子任务：在父任务的工作群里通知父任务的负责人 bot。根任务：在根群里 @ 派发人。
  */
 async function resolveNotifyTarget(t, id, label, note, ctx) {
   const { board, chat } = ctx;
@@ -65,15 +65,11 @@ async function resolveNotifyTarget(t, id, label, note, ctx) {
     return { chatId, text };
   }
 
+  // 根任务的工作群就是根群；旧数据可能没有，这时不通知
   if (!t.work_chat) {
     return null;
   }
-  const desc = await chat.getDescription(t.work_chat.chat_id);
-  const parsed = parseDescription(desc);
-  if (!parsed) {
-    throw new MuxError(ErrorCode.NO_WORK_CHAT, `工作群 ${t.work_chat.chat_id} 的描述不是 muxboard 格式，无法确定上级群`);
-  }
   const prefix = t.dispatcher ? `${mention(t.dispatcher.open_id, t.dispatcher.name ?? '派发人')} ` : '';
   const text = `${prefix}任务「${t.title}」（${id}）${label}：${note}\n查看详情：muxboard show ${id}`;
-  return { chatId: parsed.upperChatId, text };
+  return { chatId: t.work_chat.chat_id, text };
 }

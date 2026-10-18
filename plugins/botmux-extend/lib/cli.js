@@ -6,16 +6,17 @@ import { createLarkRunner } from './lark.js';
 import { createBoard } from './board.js';
 import { createChat } from './chat.js';
 
-const COMMANDS = ['init', 'show', 'start', 'children', 'add', 'assign', 'status', 'output'];
+const COMMANDS = ['init', 'show', 'start', 'children', 'add', 'split', 'assign', 'status', 'output'];
 
 const USAGE = `muxboard <命令> [参数]
 
 命令：
-  init --title --desc --criteria [--priority] [--from <open_id>]   创建根任务
+  init --title --desc --criteria [--priority] [--from <open_id>]   在当前普通群创建根任务
   show <任务ID>                                                     查看任务详情
   start <任务ID>                                                    开始处理任务
   children <任务ID> [--status <状态>]                               查看子任务
   add <父任务ID> --title --desc --criteria [--priority]             创建子任务
+  split <任务ID>                                                    为要继续拆分的任务建工作群
   assign <子任务ID> --bot <app_id>                                  分派子任务
   status <任务ID> <进行中|阻塞|已完成> [--note <说明>]              更新状态
   output <任务ID> <内容>                                            写入产出`;
@@ -50,7 +51,12 @@ export async function main(argv, env = process.env) {
     const ctx = {
       board: createBoard(run, loadConfig()),
       chat: createChat(run),
-      env: { appId: env.BOTMUX_LARK_APP_ID, chatId: env.BOTMUX_CHAT_ID, ownerOpenId: env.BOTMUX_OWNER_OPEN_ID },
+      env: {
+        appId: env.BOTMUX_LARK_APP_ID,
+        chatId: env.BOTMUX_CHAT_ID,
+        chatType: env.BOTMUX_CHAT_TYPE,
+        ownerOpenId: env.BOTMUX_OWNER_OPEN_ID,
+      },
       now: () => new Date(),
     };
     const mod = await import(`./commands/${command}.js`);

@@ -3,9 +3,10 @@
  * @typedef {Object} Ctx
  * @property {import('./board.js').Board} board
  * @property {import('./chat.js').Chat} chat
- * @property {{appId: string, chatId: string|undefined, ownerOpenId: string|undefined}} env
+ * @property {{appId: string, chatId: string|undefined, chatType: string|undefined, ownerOpenId: string|undefined}} env
  *   appId ← BOTMUX_LARK_APP_ID（cli.js 已保证存在）
  *   chatId ← BOTMUX_CHAT_ID（当前会话所在群）
+ *   chatType ← BOTMUX_CHAT_TYPE（group / p2p）
  *   ownerOpenId ← BOTMUX_OWNER_OPEN_ID（会话发起人）
  * @property {() => Date} now
  */

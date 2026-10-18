@@ -12,7 +12,7 @@
 - bot 只能通过 `muxboard` 访问看板，每条命令都按任务 ID 操作，没有列出整张表的命令。
 - 消息里只传任务 ID 和查看命令，任务详情由 bot 自己用 `muxboard show` 去看板上读。
 - 分派和状态汇报的消息由 `muxboard` 以执行命令的 bot 的身份发出；执行过程中的其他沟通，bot 直接在群里对话。
-- 每个父任务有一个工作群，群里记着上级群的信息，汇报沿着群一级级往上走，根任务最终在人派发任务的群里汇报。
+- 根任务的群就是人派发任务的那个普通群；子任务要继续拆分时，用 `split` 为它新建工作群，把上级群里的人和 bot 拉进来。汇报沿着群一级级往上走，根任务最终在根任务的群里向人汇报。
 - 插件提供一个技能（skill），告诉 bot 什么时候用哪个命令。
 - `muxboard` 底层调用 `lark-cli`，统一用 bot 身份，所有命令输出 JSON。
 
@@ -40,7 +40,7 @@ CLI 内部用字段 ID 读写，不用字段名。字段名可以改，ID 不变
 | 优先级 | `fldLxu5DPC` | 单选 | 高 / 中 / 低 |
 | 负责人 | `fldPKudYmh` | 文本 | 存 bot 的 app_id，如 `cli_xxx` |
 | 父任务 | `fldhZR2aJp` | 关联（双向） | 指向父任务，飞书自动生成反向的子任务列表 |
-| 工作群 | `fldnCfUCxW` | 群聊 | 只有父任务（有子任务的任务）才填，是它的子任务协作的群；叶子任务（没有下级任务）留空 |
+| 工作群 | `fldnCfUCxW` | 群聊 | 这个任务的子任务协作的群。根任务是 `init` 所在的群；其他任务在 `split` 时新建；没有继续拆分的任务留空 |
 | 准出标准 | `fldfuR0nmi` | 文本 | 任务完成的判断标准 |
 | 当前进展 | `fldMc28yQk` | 文本 | 最近一次状态变更的说明，见第 6.3 节 |
 | 产出 | `fldgNsHCoP` | 文本 | 暂保留为文本，后续改为附件 |
@@ -75,47 +75,51 @@ CLI 内部用字段 ID 读写，不用字段名。字段名可以改，ID 不变
 
 **根任务**
 
-1. 人在群里（下文称"来源群"）@ 初始 bot 派发任务。
-2. 初始 bot 执行 `muxboard init`，创建根任务记录：负责人是自己，状态为进行中，派发人写进"派发人"字段。
+1. 人在一个普通群里（下文称"根群"）@ 初始 bot 派发任务。
+2. 初始 bot 执行 `muxboard init`：CLI 先确认当前会话是普通群（不是单聊、不是话题群），然后创建根任务记录：负责人是自己，状态为进行中，派发人写进"派发人"字段，根群写进"工作群"字段。不新建群。
 
 **子任务**
 
-1. 父任务的 bot 用 `muxboard add` 创建子任务，状态为待分配。
-2. 父任务第一次创建子任务时，CLI 新建一个工作群，并写入父任务的"工作群"字段。
-3. 父任务的 bot 用 `muxboard assign` 把子任务分给某个 bot：CLI 写负责人，把目标 bot 拉进工作群，并在群里 @ 它。消息里只有任务 ID 和查看命令。
-4. 目标 bot 执行 `muxboard show <任务ID>` 读取任务详情，再执行 `muxboard start <任务ID>`，状态改为进行中。
-5. 执行过程中需要沟通时，父子 bot 直接在工作群里对话，不经过 CLI。
+1. 父任务的 bot 用 `muxboard add` 创建子任务，状态为待分配。父任务必须已经有工作群：根任务的工作群就是根群；其他任务要先 `split`。
+2. 父任务的 bot 用 `muxboard assign` 把子任务分给某个 bot：CLI 写负责人，把目标 bot 拉进父任务的工作群，并在群里 @ 它。消息里只有任务 ID 和查看命令。
+3. 目标 bot 执行 `muxboard show <任务ID>` 读取任务详情，再执行 `muxboard start <任务ID>`，状态改为进行中。
+4. 执行过程中需要沟通时，父子 bot 直接在工作群里对话，不经过 CLI。
+
+**子任务继续拆分**
+
+1. 子任务的 bot 发现任务需要再拆分时，执行 `muxboard split <任务ID>`，为这个任务新建工作群，把上级群里的人和 bot 都拉进来。
+2. 之后按"子任务"一节的步骤，在新群里 `add`、`assign`。
 
 **完成与汇报**
 
 1. 任务完成时，负责人 bot 执行 `muxboard status <任务ID> 已完成 --note ...`。
-2. CLI 以这个 bot 的身份，在"上级群"里 @ 上级任务的 bot，消息里带任务 ID 和查看命令：
-   - 子任务：上级群是父任务的工作群。
-   - 根任务：上级群是来源群，@ 的是派发人。根任务没有子任务时不发消息，因为 bot 本来就在来源群里和人对话。
+2. CLI 以这个 bot 的身份发汇报消息，消息里带任务 ID 和查看命令：
+   - 子任务：发到父任务的工作群，@ 父任务的 bot。
+   - 根任务：发到根群，@ 派发人。
 3. 父任务的 bot 收到消息后，自己用 `muxboard children <父任务ID>` 检查所有子任务的状态，再决定下一步：继续等、追加任务，或者确认完成后把父任务设为已完成。父任务设为已完成时，按第 2 步继续往上汇报。
 
 **工作群**
 
-- 每个父任务一个群：一组子任务对应一个新群，群名用"根任务标题 - 父任务标题"（父任务就是根任务时只用根任务标题）。
-- 子任务自己再拆子任务时，它成为新的父任务，CLI 为它再建一个群。
-- 建群的是父任务的 bot，所以它是群主，也天然在群里。
-- **群里记着上级群**：建群时，CLI 把"任务 ID + 上级群 ID"写进群描述，并在群里发一条说明消息：
+- 根任务的工作群就是根群，`init` 不建群，也不改根群的群名和群描述。
+- 其他任务的工作群由 `split` 新建，群名用"根任务标题 - 该任务标题"。
+- 建群的是执行 `split` 的 bot，所以它是群主，也天然在群里。
+- **拉人和 bot**：`split` 把上级群（父任务的工作群）里的人和 bot 都拉进新群。人用于了解进展；bot 是当前参与协作的这组 bot，进群后才能被分派、被 @。用的是建群 bot 自己查到的群成员 ID，不存在跨应用 ID 不一致的问题。人单次最多拉 50 个。
+- **群里记着上级群**：`split` 建群时，CLI 把"任务 ID + 上级群 ID"写进群描述，并在群里发一条说明消息：
 
   ```
   本群是任务「用户系统」（recYYY）的工作群，上级群：oc_xxx。
   查看任务详情：muxboard show recYYY
   ```
 
-  根任务工作群的上级群就是来源群。根任务第一次 `add` 时，还没有工作群，根任务的 bot 一定是在来源群的会话里执行的，所以 CLI 直接取当前群（`BOTMUX_CHAT_ID`）作为来源群，不需要额外存储。群描述上限 100 个字符，任务 ID 和群 ID 加起来约 60 个字符，放得下。
-- **人进群**：建群时，CLI 只把上级群里的人拉进新群，不拉上级群里的 bot。bot 只在 `assign` 时按需拉进来。这样根任务派发人所在的来源群里的人，会一级级被带进所有下级工作群。用的是建群 bot 自己查到的群成员 open_id，不存在跨应用 ID 不一致的问题。单次最多拉 50 人。
+  群描述上限 100 个字符，任务 ID 和群 ID 加起来约 60 个字符，放得下。
 
-**父任务的 bot 在工作群里没有之前的对话上下文**
+**bot 在新群里没有之前的对话上下文**
 
-botmux 按"群 + bot"区分会话。父任务的 bot 是在上一级的群里接到任务、做的拆分，它在新建的工作群里还没有会话：
+botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做的拆分，它在新建的工作群里还没有会话：
 
-- 子 bot 在工作群里回复或汇报时，botmux 会为父任务的 bot 在工作群里新开一个会话，这个会话不知道之前的计划。
-- 解决办法：工作群的说明消息和群描述里有父任务 ID，汇报消息里也带任务 ID。父任务的 bot 被唤醒后，先用 `muxboard show` 和 `muxboard children` 从看板读回情况。
-- 子 bot 是在工作群里接到任务的，它的整个执行过程都在同一个会话里，不受影响。
+- 子 bot 在新群里回复或汇报时，botmux 会为它在新群里新开一个会话，这个会话不知道之前的计划。
+- 解决办法：新群的说明消息和群描述里有任务 ID，汇报消息里也带任务 ID。bot 被唤醒后，先用 `muxboard show` 和 `muxboard children` 从看板读回情况。
+- 根任务的子任务在根群里分派和汇报，根任务的 bot 一直在同一个群里，不受这个问题影响。
 
 **依赖关系**
 
@@ -129,7 +133,8 @@ botmux 按"群 + bot"区分会话。父任务的 bot 是在上一级的群里接
 | 依赖 | 来源 | 用途 |
 | --- | --- | --- |
 | `BOTMUX_LARK_APP_ID` | botmux 注入 | 当前 bot 的 app_id，用作负责人 |
-| `BOTMUX_CHAT_ID` | botmux 注入 | 当前群 ID，根任务第一次 `add` 时作为来源群 |
+| `BOTMUX_CHAT_ID` | botmux 注入 | 当前群 ID，`init` 时作为根群 |
+| `BOTMUX_CHAT_TYPE` | botmux 注入 | 当前会话类型（`group` / `p2p`），`init` 时为 `p2p` 直接拒绝 |
 | `lark-cli` | 本机已安装 | 读写看板、建群、查群成员、发消息，统一 `--as bot` |
 | 配置文件 | 插件自带 | base token、table ID、字段 ID 映射 |
 
@@ -145,14 +150,22 @@ botmux 按"群 + bot"区分会话。父任务的 bot 是在上一级的群里接
 | `muxboard show <任务ID>` | 查看任务详情 | 所有 bot |
 | `muxboard start <任务ID>` | 开始处理分派给自己的任务 | 被分派的 bot |
 | `muxboard children <任务ID>` | 查看子任务列表 | 父任务的 bot |
-| `muxboard add <父任务ID>` | 创建子任务，必要时建工作群 | 父任务的 bot |
+| `muxboard add <父任务ID>` | 创建子任务 | 父任务的 bot |
+| `muxboard split <任务ID>` | 为要继续拆分的任务新建工作群，拉入上级群的人和 bot | 子任务的 bot |
 | `muxboard assign <子任务ID>` | 把子任务分给某个 bot，在工作群里 @ 它 | 父任务的 bot |
 | `muxboard status <任务ID> <状态>` | 更新状态；阻塞或完成时向上级群汇报 | 负责人 bot |
 | `muxboard output <任务ID> <内容>` | 写入产出 | 负责人 bot |
 
 #### `muxboard init`
 
-创建根任务：负责人是当前 bot，状态为进行中。
+创建根任务：负责人是当前 bot，状态为进行中，工作群是当前群（根群）。
+
+当前会话必须是普通群：
+
+1. `BOTMUX_CHAT_TYPE` 为 `p2p`（单聊）时拒绝。
+2. 用 `lark-cli im chats get` 读当前群信息：`chat_mode` 必须是 `group`，`group_message_type` 不能是 `thread`（话题模式），否则拒绝。
+
+不满足时返回 `not_group_chat`，不写看板。
 
 | 参数 | 必填 | 说明 |
 | --- | --- | --- |
@@ -166,7 +179,9 @@ botmux 按"群 + bot"区分会话。父任务的 bot 是在上一级的群里接
 
 这个 open_id 属于根任务 bot 的应用。根任务完成时由同一个 bot 发汇报消息，所以可以直接用它 @ 派发人。
 
-输出：`{"ok": true, "data": {"task_id": "recXXX"}}`
+输出：`{"ok": true, "data": {"task_id": "recXXX", "chat_id": "oc_xxx"}}`。`chat_id` 是根群。
+
+错误：缺少 `BOTMUX_CHAT_ID` → `not_in_botmux`；当前会话不是普通群 → `not_group_chat`。
 
 #### `muxboard show <任务ID>`
 
@@ -232,13 +247,7 @@ botmux 按"群 + bot"区分会话。父任务的 bot 是在上一级的群里接
 
 #### `muxboard add <父任务ID>`
 
-在父任务下创建一个子任务，状态为待分配。父任务还没有工作群时，先建群：
-
-1. 群名按第 5 节规则生成。
-2. 群描述写"任务 ID + 上级群 ID"。根任务的上级群是来源群；其他任务的上级群是它的父任务的工作群。
-3. 把上级群里的人拉进新群。
-4. 写入父任务的"工作群"字段。
-5. 在群里发说明消息。
+在父任务下创建一个子任务，状态为待分配。不建群：父任务必须已经有工作群（根任务的工作群是根群；其他任务先执行 `split`）。
 
 | 参数 | 必填 | 说明 |
 | --- | --- | --- |
@@ -248,9 +257,29 @@ botmux 按"群 + bot"区分会话。父任务的 bot 是在上一级的群里接
 | `--criteria <文本>` | 是 | 准出标准 |
 | `--priority <高\|中\|低>` | 否 | 优先级，默认"中" |
 
-输出：`{"ok": true, "data": {"task_id": "recZZZ", "chat_id": "oc_xxx", "chat_created": true}}`。`chat_created` 表示这次是否新建了群。
+输出：`{"ok": true, "data": {"task_id": "recZZZ", "chat_id": "oc_xxx"}}`。`chat_id` 是父任务的工作群，子任务会在这个群里分派。
 
-错误：`not_found`。
+错误：`not_found`；父任务没有工作群 → `no_work_chat`（提示先执行 `split`）。
+
+#### `muxboard split <任务ID>`
+
+为要继续拆分的任务新建工作群：
+
+1. 读父任务的工作群作为上级群。
+2. 新建群：群名"根任务标题 - 该任务标题"，群描述写"任务 ID + 上级群 ID"，同时拉入上级群里的人（最多 50 个）。
+3. 把上级群里的 bot（不含自己，建群的 bot 已在群里）拉进新群。
+4. 写入这个任务的"工作群"字段。
+5. 在新群里发说明消息。
+
+任务已经有工作群时不重复建群，直接返回现有的群，`chat_created` 为 false。根任务的工作群就是根群，不能 `split`。
+
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `<任务ID>` | 是 | 要继续拆分的任务 ID |
+
+输出：`{"ok": true, "data": {"task_id": "recZZZ", "chat_id": "oc_xxx", "chat_created": true, "bots": ["cli_xxx"]}}`。`bots` 是拉进新群的 bot 的 app_id。
+
+错误：`not_found`；对根任务执行 → `invalid_args`；父任务没有工作群 → `no_work_chat`。
 
 #### `muxboard assign <子任务ID>`
 
@@ -282,13 +311,14 @@ botmux 按"群 + bot"区分会话。父任务的 bot 是在上一级的群里接
 | `<状态>` | 是 | `进行中` / `阻塞` / `已完成` |
 | `--note <文本>` | 阻塞、已完成时必填 | 写进"当前进展" |
 
-改成阻塞或已完成后，CLI 以当前 bot 的身份在上级群里发消息：
+改成阻塞或已完成后，CLI 以当前 bot 的身份发汇报消息：
 
-| 任务 | 上级群 | @ 谁 |
+| 任务 | 发到哪个群 | @ 谁 |
 | --- | --- | --- |
 | 子任务 | 父任务的工作群 | 父任务的 bot |
-| 有子任务的根任务 | 来源群（从根任务工作群的群描述里读） | 派发人（"派发人"字段）；字段为空时只发消息，不 @ 人 |
-| 没有子任务的根任务 | 不发消息 | — |
+| 根任务 | 根群（根任务的"工作群"字段） | 派发人（"派发人"字段）；字段为空时只发消息，不 @ 人 |
+
+根任务没有工作群（`init` 改版之前创建的旧数据）时不发消息，`notified` 为 false。
 
 消息示例：
 
@@ -325,7 +355,8 @@ botmux 按"群 + bot"区分会话。父任务的 bot 是在上一级的群里接
 | `no_work_chat` | 找不到发消息的工作群 |
 | `bot_unresolved` | 在群成员里找不到目标 bot，无法 @ |
 | `lark_error` | `lark-cli` 调用失败，`message` 里带原始错误 |
-| `invalid_args` | 命令或参数不合法，比如缺少必填参数、优先级不是高/中/低 |
+| `invalid_args` | 命令或参数不合法，比如缺少必填参数、优先级不是高/中/低、对根任务执行 `split` |
+| `not_group_chat` | `init` 时当前会话不是普通群（单聊或话题群） |
 
 ### 6.3 "当前进展"字段
 
@@ -342,8 +373,9 @@ botmux 按"群 + bot"区分会话。父任务的 bot 是在上一级的群里接
 ### 6.4 实现
 
 - 看板读写：`lark-cli base +record-list`、`+record-get`、`+record-upsert`。
-- 建群：`lark-cli im +chat-create`，用 `--bots` 拉 bot、`--users` 拉人、`--description` 写群描述。
-- 读群描述：`lark-cli im chats get`。
+- 建群：`lark-cli im +chat-create`，用 `--users` 拉人、`--description` 写群描述。
+- 拉 bot 入群：`lark-cli im chat.members create --member-id-type app_id`。
+- 读群信息（判断是否普通群）：`lark-cli im chats get`。
 - 查群成员：`lark-cli im +chat-members-list`，`bots` 和 `users` 分开返回。
 - 发消息：`lark-cli im +messages-send`，@ 写成 `<at user_id="open_id">名称</at>`。
 - `lark-cli base +record-list` / `+record-get` 默认把结果写成文件，放在当前工作目录。CLI 统一加 `--format json`，结果直接在输出里返回，不产生文件。
@@ -355,9 +387,9 @@ botmux 按"群 + bot"区分会话。父任务的 bot 是在上一级的群里接
 | --- | --- |
 | `bin/muxboard` | 入口 |
 | `lib/cli.js` | 解析参数、检查环境变量、组装依赖、分发命令、输出 JSON |
-| `lib/commands/*.js` | 8 个命令，每个导出 `run(args, ctx)` |
+| `lib/commands/*.js` | 9 个命令，每个导出 `run(args, ctx)` |
 | `lib/board.js` | 看板读写：`getTask`、`listChildren`、`createTask`、`updateTask` |
-| `lib/chat.js` | 群操作：`create`、`getDescription`、`listMembers`、`addBots`、`send` |
+| `lib/chat.js` | 群操作：`create`、`getInfo`、`listMembers`、`addBots`、`send` |
 | `lib/lark.js` | 调用 `lark-cli`（自动加 `--as bot`），出错时抛 `lark_error` |
 | `lib/workchat.js` | 工作群的群名、群描述格式、说明消息、@ 写法 |
 | `lib/args.js`、`errors.js`、`constants.js`、`progress.js`、`context.js` | 参数解析、错误码、状态常量、当前进展格式、命令依赖的类型定义 |
@@ -373,7 +405,8 @@ botmux 按"群 + bot"区分会话。父任务的 bot 是在上一级的群里接
 
 - 收到包含任务 ID 的派发消息时，先执行 `muxboard show <任务ID>` 读取详情，再执行 `muxboard start <任务ID>`，按描述和准出标准开展工作。
 - 在工作群里被唤醒、却不清楚上下文时，从群说明消息或收到的消息里找到任务 ID，用 `muxboard show`、`muxboard children` 从看板读回情况。
-- 任务需要拆分时，用 `add` 建子任务、用 `assign` 分派。
+- 根任务需要拆分时，直接用 `add` 建子任务、用 `assign` 分派，子任务在根群里分派。
+- 子任务还要继续拆分时，先 `split <自己的任务ID>` 建工作群，再 `add`、`assign`。
 - 执行中需要沟通时，直接在工作群里回复对方。
 - 受阻时执行 `status <任务ID> 阻塞 --note ...`。
 - 完成前对照准出标准自查，用 `output` 写产出，再执行 `status <任务ID> 已完成 --note ...`。
@@ -413,6 +446,8 @@ botmux 按"群 + bot"区分会话。父任务的 bot 是在上一级的群里接
    - 联调用的两条记录已删除；联调时建的工作群"muxboard 联调根任务"保留在飞书里。
 4. 编写 `task-board` 技能。
 5. 跨 bot 真实联调：Jarvis 创建根任务、建子任务并分派给 Beta。Beta 在自己的 botmux 会话里，用自己的身份执行 `show`、`start`、`output`、`status 已完成`，全部成功；CLI 以 Beta 的身份在工作群 @ Jarvis 汇报，Jarvis 的 botmux 会话被唤醒。联调记录已删除，工作群"muxboard Beta 联调"保留在飞书里。
+
+6. 2026-10-18 改版：`init` 以当前普通群作为根群，不再建群；新增 `split` 为要继续拆分的子任务建群，并拉入上级群的人和 bot；`add` 不再建群。单元测试 65 个、端到端测试 135 项全部通过，其中包括 split 时把人拉进新群。
 
 **还没验证**：安装插件后，bot 只凭 `task-board` 技能（不靠人工给出的命令清单）自主走完流程。联调时插件还没安装，是在消息里给了 Beta `muxboard` 的绝对路径和要执行的命令。
 

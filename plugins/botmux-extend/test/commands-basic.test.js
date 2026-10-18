@@ -9,14 +9,23 @@ import { makeCtx, task } from './helpers.js';
 
 const FLAGS = { title: '登录功能', desc: '参考文档 https://x', criteria: '接口通过联调' };
 
-test('init 写入任务字段，派发人优先用 --from', async () => {
+/** 普通群的假 chat；info 可覆盖 getInfo 的返回值。 */
+const groupChat = (info = {}) => ({
+  getInfo: async () => ({ name: '群', chat_mode: 'group', group_message_type: 'chat', ...info }),
+});
+
+/** 记录 createTask 调用的假 board。 */
+function recordingBoard() {
   const created = [];
-  const ctx = makeCtx({
-    board: { createTask: async (patch) => (created.push(patch), 'recNew') },
-  });
+  return { created, board: { createTask: async (patch) => (created.push(patch), 'recNew') } };
+}
+
+test('init 写入任务字段，工作群是当前群，派发人优先用 --from', async () => {
+  const { created, board } = recordingBoard();
+  const ctx = makeCtx({ board, chat: groupChat() });
   const result = await init({ positionals: [], flags: { ...FLAGS, from: 'ou_sender' } }, ctx);
 
-  assert.deepEqual(result, { task_id: 'recNew' });
+  assert.deepEqual(result, { task_id: 'recNew', chat_id: 'oc_current' });
   assert.deepEqual(created[0], {
     title: '登录功能',
     desc: '参考文档 https://x',
@@ -25,28 +34,55 @@ test('init 写入任务字段，派发人优先用 --from', async () => {
     status: '进行中',
     owner: 'cli_self',
     progress: '[10-17 15:30] 进行中：创建任务',
+    work_chat_id: 'oc_current',
     dispatcher_open_id: 'ou_sender',
   });
 });
 
 test('init 没有 --from 时用 ownerOpenId 作为派发人', async () => {
-  const created = [];
-  const ctx = makeCtx({
-    board: { createTask: async (patch) => (created.push(patch), 'recNew') },
-  });
-  await init({ positionals: [], flags: { ...FLAGS, priority: '高' } }, ctx);
+  const { created, board } = recordingBoard();
+  await init({ positionals: [], flags: { ...FLAGS, priority: '高' } }, makeCtx({ board, chat: groupChat() }));
   assert.equal(created[0].dispatcher_open_id, 'ou_owner');
   assert.equal(created[0].priority, '高');
 });
 
 test('init 派发人都没有时不写 dispatcher_open_id', async () => {
-  const created = [];
-  const ctx = makeCtx({
-    board: { createTask: async (patch) => (created.push(patch), 'recNew') },
-    env: { ownerOpenId: undefined },
-  });
+  const { created, board } = recordingBoard();
+  const ctx = makeCtx({ board, chat: groupChat(), env: { ownerOpenId: undefined } });
   await init({ positionals: [], flags: FLAGS }, ctx);
   assert.equal('dispatcher_open_id' in created[0], false);
+});
+
+test('init 单聊时抛 not_group_chat，不读群信息也不写看板', async () => {
+  const ctx = makeCtx({
+    board: { createTask: async () => assert.fail('不应调用') },
+    chat: { getInfo: async () => assert.fail('不应调用') },
+    env: { chatType: 'p2p' },
+  });
+  await assert.rejects(init({ positionals: [], flags: FLAGS }, ctx), { code: 'not_group_chat' });
+});
+
+test('init 读不到群模式（群已解散或 bot 不在群里）时抛 not_group_chat', async () => {
+  const ctx = makeCtx({ board: { createTask: async () => assert.fail('不应调用') }, chat: groupChat({ chat_mode: null }) });
+  await assert.rejects(init({ positionals: [], flags: FLAGS }, ctx), (err) => err.code === 'not_group_chat' && err.message.includes('已解散'));
+});
+
+test('init 话题群（chat_mode=topic）时抛 not_group_chat', async () => {
+  const ctx = makeCtx({ board: { createTask: async () => assert.fail('不应调用') }, chat: groupChat({ chat_mode: 'topic' }) });
+  await assert.rejects(init({ positionals: [], flags: FLAGS }, ctx), { code: 'not_group_chat' });
+});
+
+test('init 话题模式群（group_message_type=thread）时抛 not_group_chat', async () => {
+  const ctx = makeCtx({
+    board: { createTask: async () => assert.fail('不应调用') },
+    chat: groupChat({ group_message_type: 'thread' }),
+  });
+  await assert.rejects(init({ positionals: [], flags: FLAGS }, ctx), { code: 'not_group_chat' });
+});
+
+test('init 缺少 BOTMUX_CHAT_ID 时抛 not_in_botmux', async () => {
+  const ctx = makeCtx({ board: { createTask: async () => assert.fail('不应调用') }, chat: groupChat(), env: { chatId: undefined } });
+  await assert.rejects(init({ positionals: [], flags: FLAGS }, ctx), { code: 'not_in_botmux' });
 });
 
 test('init 缺少必填参数时抛 invalid_args', async () => {

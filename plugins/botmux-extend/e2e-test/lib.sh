@@ -25,10 +25,11 @@ cd "${WORKDIR}" || exit 1
 trap 'rm -rf "${WORKDIR}"' EXIT
 
 # mb <参数...>：模拟 botmux 会话运行 muxboard，输出存到 OUT，退出码存到 RC。
-# 当前群默认是来源群，用 CHAT=<oc_x> mb ... 覆盖；会话发起人用 OWNER=<ou_x> mb ... 设置。
+# 当前群默认是来源群，用 CHAT=<oc_x> mb ... 覆盖；会话类型默认 group，用 CHAT_TYPE=p2p mb ... 覆盖；
+# 会话发起人用 OWNER=<ou_x> mb ... 设置。
 mb() {
   OUT=$(BOTMUX_LARK_APP_ID="${E2E_APP_ID}" BOTMUX_CHAT_ID="${CHAT:-${E2E_SOURCE_CHAT}}" \
-    BOTMUX_OWNER_OPEN_ID="${OWNER:-}" "${MUXBOARD}" "$@")
+    BOTMUX_CHAT_TYPE="${CHAT_TYPE:-group}" BOTMUX_OWNER_OPEN_ID="${OWNER:-}" "${MUXBOARD}" "$@")
   RC=$?
 }
 
@@ -70,6 +71,11 @@ chat_field() { lark im chats get --chat-id "$1" 2>/dev/null | jq -r ".data.$2 //
 # chat_users <chat_id>：群里的人（不含 bot），open_id 排序后每行一个
 chat_users() {
   lark im +chat-members-list --chat-id "$1" --page-all 2>/dev/null | jq -r '.data.users[]?.member_id' | sort
+}
+
+# chat_bots <chat_id>：群里的 bot，app_id 排序后每行一个
+chat_bots() {
+  lark im +chat-members-list --chat-id "$1" --page-all 2>/dev/null | jq -r '.data.bots[]?.app_id' | sort
 }
 
 # chat_has <chat_id> <子串> [mention]：群里最近的消息中有包含子串的消息则输出 yes。

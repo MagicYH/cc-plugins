@@ -1,9 +1,10 @@
-// add / assign / status 三个命令的流程测试。board 和 chat 都是假对象，不调用 lark-cli。
+// add / split / assign / status 四个命令的流程测试。board 和 chat 都是假对象，不调用 lark-cli。
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeCtx, task } from './helpers.js';
 import { run as add } from '../lib/commands/add.js';
+import { run as split } from '../lib/commands/split.js';
 import { run as assign } from '../lib/commands/assign.js';
 import { run as status } from '../lib/commands/status.js';
 import { Status } from '../lib/constants.js';
@@ -37,7 +38,7 @@ function fakeBoard(tasks, { children = [] } = {}) {
 }
 
 /** 假 chat，记录 create / send / addBots 调用。 */
-function fakeChat({ members = { users: [], bots: [] }, description = '' } = {}) {
+function fakeChat({ members = { users: [], bots: [] } } = {}) {
   const calls = { create: [], send: [], addBots: [] };
   return {
     calls,
@@ -45,9 +46,6 @@ function fakeChat({ members = { users: [], bots: [] }, description = '' } = {}) 
       async create(opts) {
         calls.create.push(opts);
         return 'oc_new';
-      },
-      async getDescription() {
-        return description;
       },
       async listMembers() {
         return members;
@@ -70,14 +68,14 @@ const addArgs = (parentId, flags = {}) => ({
   flags: { title: '子标题', desc: '描述', criteria: '验收', ...flags },
 });
 
-test('add: 父任务已有工作群时不建群，直接建子任务', async () => {
+test('add: 在父任务的工作群下建子任务，不建群', async () => {
   const parent = task({ task_id: 'recP', title: '父', work_chat: { chat_id: 'oc_work', name: '群' } });
   const { board, created, updates } = fakeBoard({ recP: parent });
   const { chat, calls } = fakeChat();
 
   const data = await add(addArgs('recP', { priority: '高' }), makeCtx({ board, chat }));
 
-  assert.deepEqual(data, { task_id: 'recNew', chat_id: 'oc_work', chat_created: false });
+  assert.deepEqual(data, { task_id: 'recNew', chat_id: 'oc_work' });
   assert.deepEqual(created, [
     {
       title: '子标题',
@@ -92,85 +90,17 @@ test('add: 父任务已有工作群时不建群，直接建子任务', async () 
   assert.equal(updates.length, 0);
 });
 
-test('add: 根任务第一次 add 时用 env.chatId 作上级群并建群', async () => {
-  const parent = task({ task_id: 'recP', title: '根任务' });
-  const { board, created, updates } = fakeBoard({ recP: parent });
-  const { chat, calls } = fakeChat({
-    members: { users: [{ open_id: 'ou_a' }, { open_id: 'ou_b' }], bots: [] },
-  });
-
-  const data = await add(addArgs('recP'), makeCtx({ board, chat, env: { chatId: 'oc_upper' } }));
-
-  assert.deepEqual(data, { task_id: 'recNew', chat_id: 'oc_new', chat_created: true });
-  assert.deepEqual(calls.create, [
-    {
-      name: '根任务',
-      description: formatDescription({ taskId: 'recP', upperChatId: 'oc_upper' }),
-      userOpenIds: ['ou_a', 'ou_b'],
-    },
-  ]);
-  assert.deepEqual(updates, [{ id: 'recP', patch: { work_chat_id: 'oc_new' } }]);
-  assert.equal(calls.send.length, 1);
-  assert.equal(calls.send[0].chatId, 'oc_new');
-  assert.match(calls.send[0].text, /recP/);
-  assert.equal(created[0].parent_id, 'recP');
-});
-
-test('add: 建群时只拉人，不传 botAppIds，人数最多 50', async () => {
-  const users = Array.from({ length: 60 }, (_, i) => ({ open_id: `ou_${i}` }));
-  const parent = task({ task_id: 'recP', title: '根任务' });
-  const { board } = fakeBoard({ recP: parent });
-  const { chat, calls } = fakeChat({ members: { users, bots: [] } });
-
-  await add(addArgs('recP'), makeCtx({ board, chat, env: { chatId: 'oc_upper' } }));
-
-  const opts = calls.create[0];
-  assert.equal(opts.userOpenIds.length, 50);
-  assert.equal(opts.userOpenIds[0], 'ou_0');
-  assert.ok(!('botAppIds' in opts));
-});
-
-test('add: 非根父任务第一次 add 时上级群取祖父任务的工作群，群名带两级标题', async () => {
-  const grand = task({ task_id: 'recG', title: '总任务', work_chat: { chat_id: 'oc_grand', name: null } });
-  const parent = task({ task_id: 'recP', title: '子任务A', parent_id: 'recG' });
-  const { board, updates } = fakeBoard({ recG: grand, recP: parent });
-  const { chat, calls } = fakeChat();
-
-  const data = await add(addArgs('recP'), makeCtx({ board, chat, env: { chatId: 'oc_current' } }));
-
-  assert.equal(data.chat_created, true);
-  assert.equal(calls.create[0].name, '总任务 - 子任务A');
-  assert.equal(
-    calls.create[0].description,
-    formatDescription({ taskId: 'recP', upperChatId: 'oc_grand' }),
-  );
-  assert.deepEqual(updates, [{ id: 'recP', patch: { work_chat_id: 'oc_new' } }]);
-  assert.match(calls.send[0].text, /oc_grand/);
-});
-
-test('add: 非根父任务的祖父没有工作群时抛 no_work_chat，不建群', async () => {
-  const grand = task({ task_id: 'recG', title: '总任务' });
-  const parent = task({ task_id: 'recP', title: '子任务A', parent_id: 'recG' });
-  const { board, created } = fakeBoard({ recG: grand, recP: parent });
+test('add: 父任务没有工作群时抛 no_work_chat 并提示先 split，不建子任务', async () => {
+  const parent = task({ task_id: 'recP', title: '子任务A', parent_id: 'recR' });
+  const { board, created } = fakeBoard({ recP: parent });
   const { chat, calls } = fakeChat();
 
   await assert.rejects(
-    add(addArgs('recP'), makeCtx({ board, chat, env: { chatId: 'oc_current' } })),
-    { code: 'no_work_chat' },
+    add(addArgs('recP'), makeCtx({ board, chat })),
+    (err) => err.code === 'no_work_chat' && err.message.includes('muxboard split recP'),
   );
   assert.equal(calls.create.length, 0);
   assert.equal(created.length, 0);
-});
-
-test('add: 根任务第一次 add 且没有 BOTMUX_CHAT_ID 时抛 not_in_botmux', async () => {
-  const parent = task({ task_id: 'recP', title: '根任务' });
-  const { board } = fakeBoard({ recP: parent });
-  const { chat } = fakeChat();
-
-  await assert.rejects(
-    add(addArgs('recP'), makeCtx({ board, chat, env: { chatId: undefined } })),
-    { code: 'not_in_botmux' },
-  );
 });
 
 test('add: 优先级不合法时抛 invalid_args', async () => {
@@ -179,6 +109,87 @@ test('add: 优先级不合法时抛 invalid_args', async () => {
     add(addArgs('recP', { priority: '紧急' }), makeCtx({ board })),
     { code: 'invalid_args' },
   );
+});
+
+// ---------- split ----------
+
+test('split: 新建群，拉入上级群的人和 bot（不含自己），写回工作群并发说明消息', async () => {
+  const root = task({ task_id: 'recR', title: '总任务', work_chat: { chat_id: 'oc_root', name: null } });
+  const child = task({ task_id: 'recC', title: '子任务A', parent_id: 'recR' });
+  const { board, updates } = fakeBoard({ recR: root, recC: child });
+  const { chat, calls } = fakeChat({
+    members: {
+      users: [{ open_id: 'ou_a' }, { open_id: 'ou_b' }],
+      bots: [{ app_id: 'cli_self' }, { app_id: 'cli_beta' }, { app_id: 'cli_zero' }],
+    },
+  });
+
+  const data = await split({ positionals: ['recC'], flags: {} }, makeCtx({ board, chat }));
+
+  assert.deepEqual(data, { task_id: 'recC', chat_id: 'oc_new', chat_created: true, bots: ['cli_beta', 'cli_zero'] });
+  assert.deepEqual(calls.create, [
+    {
+      name: '总任务 - 子任务A',
+      description: formatDescription({ taskId: 'recC', upperChatId: 'oc_root' }),
+      userOpenIds: ['ou_a', 'ou_b'],
+    },
+  ]);
+  assert.deepEqual(calls.addBots, [{ chatId: 'oc_new', appIds: ['cli_beta', 'cli_zero'] }]);
+  assert.deepEqual(updates, [{ id: 'recC', patch: { work_chat_id: 'oc_new' } }]);
+  assert.equal(calls.send[0].chatId, 'oc_new');
+  assert.match(calls.send[0].text, /本群是任务「子任务A」（recC）的工作群，上级群：oc_root/);
+});
+
+test('split: 三级任务的群名用根任务标题，上级群取父任务的工作群，人数最多 50', async () => {
+  const users = Array.from({ length: 60 }, (_, i) => ({ open_id: `ou_${i}` }));
+  const root = task({ task_id: 'recR', title: '总任务', work_chat: { chat_id: 'oc_root', name: null } });
+  const mid = task({ task_id: 'recM', title: '中间任务', parent_id: 'recR', work_chat: { chat_id: 'oc_mid', name: null } });
+  const leaf = task({ task_id: 'recL', title: '叶子任务', parent_id: 'recM' });
+  const { board } = fakeBoard({ recR: root, recM: mid, recL: leaf });
+  const { chat, calls } = fakeChat({ members: { users, bots: [] } });
+
+  await split({ positionals: ['recL'], flags: {} }, makeCtx({ board, chat }));
+
+  assert.equal(calls.create[0].name, '总任务 - 叶子任务');
+  assert.equal(calls.create[0].description, formatDescription({ taskId: 'recL', upperChatId: 'oc_mid' }));
+  assert.equal(calls.create[0].userOpenIds.length, 50);
+});
+
+test('split: 已有工作群时不重复建群', async () => {
+  const child = task({ task_id: 'recC', parent_id: 'recR', work_chat: { chat_id: 'oc_c', name: null } });
+  const { board, updates } = fakeBoard({ recC: child });
+  const { chat, calls } = fakeChat();
+
+  const data = await split({ positionals: ['recC'], flags: {} }, makeCtx({ board, chat }));
+
+  assert.deepEqual(data, { task_id: 'recC', chat_id: 'oc_c', chat_created: false, bots: [] });
+  assert.equal(calls.create.length, 0);
+  assert.equal(updates.length, 0);
+});
+
+test('split: 根任务抛 invalid_args', async () => {
+  const root = task({ task_id: 'recR', work_chat: { chat_id: 'oc_root', name: null } });
+  const { board } = fakeBoard({ recR: root });
+  const { chat, calls } = fakeChat();
+
+  await assert.rejects(
+    split({ positionals: ['recR'], flags: {} }, makeCtx({ board, chat })),
+    { code: 'invalid_args' },
+  );
+  assert.equal(calls.create.length, 0);
+});
+
+test('split: 父任务没有工作群时抛 no_work_chat，不建群', async () => {
+  const parent = task({ task_id: 'recP', parent_id: 'recR' });
+  const child = task({ task_id: 'recC', parent_id: 'recP' });
+  const { board } = fakeBoard({ recP: parent, recC: child });
+  const { chat, calls } = fakeChat();
+
+  await assert.rejects(
+    split({ positionals: ['recC'], flags: {} }, makeCtx({ board, chat })),
+    { code: 'no_work_chat' },
+  );
+  assert.equal(calls.create.length, 0);
 });
 
 // ---------- assign ----------
@@ -279,17 +290,15 @@ test('status: 子任务有未完成子任务时抛 children_unfinished，且不�
   assert.equal(calls.send.length, 0);
 });
 
-test('status: 根任务完成时发到工作群描述里的上级群，并 @ 派发人', async () => {
+test('status: 根任务完成时在根群里 @ 派发人', async () => {
   const root = task({
     task_id: 'recR',
     title: '根任务',
     dispatcher: { open_id: 'ou_disp', name: '张三' },
-    work_chat: { chat_id: 'oc_work', name: null },
+    work_chat: { chat_id: 'oc_root', name: null },
   });
   const { board, updates } = fakeBoard({ recR: root }, { children: [] });
-  const { chat, calls } = fakeChat({
-    description: formatDescription({ taskId: 'recR', upperChatId: 'oc_upper' }),
-  });
+  const { chat, calls } = fakeChat();
 
   const data = await status(
     { positionals: ['recR', Status.DONE], flags: { note: '全部完成' } },
@@ -298,11 +307,21 @@ test('status: 根任务完成时发到工作群描述里的上级群，并 @ 派
 
   assert.deepEqual(data, { task_id: 'recR', status: Status.DONE, notified: true });
   assert.equal(updates[0].patch.status, Status.DONE);
-  assert.equal(calls.send[0].chatId, 'oc_upper');
+  assert.equal(calls.send[0].chatId, 'oc_root');
   assert.ok(calls.send[0].text.startsWith('<at user_id="ou_disp">张三</at> 任务「根任务」（recR）已完成：全部完成'));
 });
 
-test('status: 根任务没有工作群时 notified=false，不发消息', async () => {
+test('status: 根任务没有派发人时只发消息，不 @ 人', async () => {
+  const root = task({ task_id: 'recR', title: '根任务', work_chat: { chat_id: 'oc_root', name: null } });
+  const { board } = fakeBoard({ recR: root }, { children: [] });
+  const { chat, calls } = fakeChat();
+
+  await status({ positionals: ['recR', Status.BLOCKED], flags: { note: '卡住了' } }, makeCtx({ board, chat }));
+
+  assert.ok(calls.send[0].text.startsWith('任务「根任务」（recR）受阻：卡住了'));
+});
+
+test('status: 根任务没有工作群（旧数据）时 notified=false，不发消息', async () => {
   const root = task({ task_id: 'recR', title: '根任务', work_chat: null });
   const { board, updates } = fakeBoard({ recR: root }, { children: [] });
   const { chat, calls } = fakeChat();

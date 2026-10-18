@@ -12,6 +12,7 @@ export class MuxError extends Error {
 
 export const ErrorCode = Object.freeze({
   NOT_IN_BOTMUX: 'not_in_botmux',
+  NOT_GROUP_CHAT: 'not_group_chat',
   INVALID_ARGS: 'invalid_args',
   NOT_FOUND: 'not_found',
   INVALID_STATUS: 'invalid_status',

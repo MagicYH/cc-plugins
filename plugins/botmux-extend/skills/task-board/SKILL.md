@@ -26,10 +26,11 @@ muxboard 是封装飞书多维表格的命令行工具，作为多个 bot 协作
 
 ## 拆分任务
 
-1. 执行 `muxboard add <父任务ID>` 创建子任务，状态为待分配。第一次添加子任务时，CLI 会自动建工作群并拉入相关人员，不需要自己建群。
-2. 执行 `muxboard assign <子任务ID> --bot <app_id>` 分派给某个 bot。CLI 会把它拉进工作群并 @ 它。
-3. 子任务之间有先后顺序（如先后端、后前端）时，等前一个完成后再分派下一个。
-4. 分派只写负责人，不改状态。对方执行 `start` 后才变成进行中。
+1. 你的任务是子任务（不是根任务）时，先执行 `muxboard split <自己的任务ID>`。CLI 会为它新建工作群，把上级群里的人和 bot 拉进来。根任务不需要这一步，它的工作群就是根群。
+2. 执行 `muxboard add <父任务ID>` 创建子任务，状态为待分配。
+3. 执行 `muxboard assign <子任务ID> --bot <app_id>` 分派给某个 bot。CLI 会把它拉进工作群并 @ 它。
+4. 子任务之间有先后顺序（如先后端、后前端）时，等前一个完成后再分派下一个。
+5. 分派只写负责人，不改状态。对方执行 `start` 后才变成进行中。
 
 ## 执行中沟通
 
@@ -51,7 +52,7 @@ muxboard status <任务ID> 阻塞 --note <原因>
 2. 执行 `muxboard output <任务ID> <产出>` 写入产出，比如 MR 链接、文档链接。
 3. 执行 `muxboard status <任务ID> 已完成 --note <说明>`。
 
-CLI 会在上级群 @ 上级 bot 汇报。若你的任务还有未完成的子任务，CLI 会拒绝（`children_unfinished`），这时先等子任务完成。
+CLI 会在父任务的工作群里 @ 父任务的 bot 汇报；根任务则在根群里 @ 派发人。若你的任务还有未完成的子任务，CLI 会拒绝（`children_unfinished`），这时先等子任务完成。
 
 ## 收到子任务的完成或受阻消息
 
@@ -64,7 +65,7 @@ CLI 会在上级群 @ 上级 bot 汇报。若你的任务还有未完成的子�
 
 ## 根任务
 
-人在群里直接派发任务时，由收到派发的 bot 创建根任务：
+人在普通群里直接派发任务时，由收到派发的 bot 创建根任务。当前群就是根任务的群，子任务在这个群里分派。单聊、话题群里不能创建（`not_group_chat`）。
 
 ```
 muxboard init --title <标题> --desc <描述> --criteria <准出标准> [--priority 高|中|低] --from <派发人 open_id>
@@ -79,11 +80,12 @@ muxboard init --title <标题> --desc <描述> --criteria <准出标准> [--prio
 
 | 命令 | 参数 | 用途 |
 | --- | --- | --- |
-| `init` | `--title <文本> --desc <文本> --criteria <文本> [--priority 高\|中\|低] [--from <open_id>]` | 创建根任务，负责人为自己，状态为进行中 |
+| `init` | `--title <文本> --desc <文本> --criteria <文本> [--priority 高\|中\|低] [--from <open_id>]` | 在当前普通群创建根任务，负责人为自己，状态为进行中 |
 | `show` | `<任务ID>` | 查看任务详情，含父任务和子任务计数 |
 | `start` | `<任务ID>` | 开始处理，待分配改为进行中；其他状态不变，直接成功 |
 | `children` | `<任务ID> [--status <状态>]` | 列出直接子任务，可按状态过滤 |
-| `add` | `<父任务ID> --title <文本> --desc <文本> --criteria <文本> [--priority 高\|中\|低]` | 创建子任务，状态为待分配；必要时自动建工作群 |
+| `add` | `<父任务ID> --title <文本> --desc <文本> --criteria <文本> [--priority 高\|中\|低]` | 创建子任务，状态为待分配；父任务要先有工作群 |
+| `split` | `<任务ID>` | 子任务要继续拆分时，为它新建工作群并拉入上级群的人和 bot |
 | `assign` | `<子任务ID> --bot <app_id>` | 分派给 bot，写负责人、拉进工作群并 @ 它；状态不变 |
 | `status` | `<任务ID> <进行中\|阻塞\|已完成> [--note <文本>]` | 更新状态并写当前进展；阻塞、已完成时必须带 `--note` |
 | `output` | `<任务ID> <内容>` | 覆盖写入产出 |
@@ -104,7 +106,8 @@ muxboard init --title <标题> --desc <描述> --criteria <准出标准> [--prio
 | `invalid_status` | 状态值不合法 | 只用 `进行中`、`阻塞`、`已完成` |
 | `note_required` | 设为阻塞或已完成时缺少 `--note` | 补上 `--note` 后重试 |
 | `children_unfinished` | 还有未完成的子任务，不能设为已完成 | 先执行 `children` 查看并等待子任务完成 |
-| `no_work_chat` | 找不到发消息的工作群 | 执行 `show` 查看父任务，必要时上报给上级确认 |
+| `not_group_chat` | 当前会话不是普通群，不能创建根任务 | 告知用户到普通群里派发任务 |
+| `no_work_chat` | 找不到工作群 | `add` 时出现：先 `split <父任务ID>`；其他情况执行 `show` 查看父任务，必要时上报 |
 | `bot_unresolved` | 群成员里找不到目标 bot，无法 @ | 稍后重试一次；仍失败则告知父任务的 bot |
 | `lark_error` | lark-cli 调用失败，`message` 里有原始错误 | 原样记录错误信息；网络或权限问题可重试一次，仍失败则告知用户 |
 

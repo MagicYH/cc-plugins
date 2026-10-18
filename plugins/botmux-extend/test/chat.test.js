@@ -33,15 +33,15 @@ test('create 传空数组时同样不带 --users 和 --bots', async () => {
   assert.deepEqual(calls[0], ['im', '+chat-create', '--name', 'n', '--description', 'd']);
 });
 
-test('getDescription 返回群描述', async () => {
-  const { run, calls } = fakeRunner([{ description: '群说明', name: 'n' }]);
-  assert.equal(await createChat(run).getDescription('oc_1'), '群说明');
+test('getInfo 返回群名、群模式和消息形式', async () => {
+  const { run, calls } = fakeRunner([{ name: 'n', chat_mode: 'group', group_message_type: 'chat', description: 'd' }]);
+  assert.deepEqual(await createChat(run).getInfo('oc_1'), { name: 'n', chat_mode: 'group', group_message_type: 'chat' });
   assert.deepEqual(calls, [['im', 'chats', 'get', '--chat-id', 'oc_1']]);
 });
 
-test('getDescription 没有描述时返回空字符串', async () => {
-  const { run } = fakeRunner([{ name: 'n' }]);
-  assert.equal(await createChat(run).getDescription('oc_1'), '');
+test('getInfo 字段缺失时为 null', async () => {
+  const { run } = fakeRunner([{}]);
+  assert.deepEqual(await createChat(run).getInfo('oc_1'), { name: null, chat_mode: null, group_message_type: null });
 });
 
 test('listMembers 映射 users 和 bots 字段', async () => {

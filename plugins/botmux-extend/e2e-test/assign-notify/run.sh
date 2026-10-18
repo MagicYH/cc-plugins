@@ -16,6 +16,7 @@ mb add "${ROOT}" --title "子任务C" --desc "端到端测试" --criteria "用�
 expect_ok "add C"
 C=$(j .data.task_id)
 W=$(j .data.chat_id)
+check "子任务在根群下" "${W}" "${E2E_SOURCE_CHAT}"
 mb add "${ROOT}" --title "子任务D" --desc "端到端测试" --criteria "用例通过"
 expect_ok "add D"
 D=$(j .data.task_id)
@@ -38,10 +39,13 @@ mb show "${C}"
 check_match "当前进展" "$(j .data.progress)" '进行中：开始处理$'
 
 case_begin "A4 二级拆分并分派"
+mb split "${C}"
+expect_ok "split C"
+W2=$(j .data.chat_id)
 mb add "${C}" --title "孙任务G" --desc "端到端测试" --criteria "用例通过"
 expect_ok "add G"
 G=$(j .data.task_id)
-W2=$(j .data.chat_id)
+check "孙任务在 C 的工作群下" "$(j .data.chat_id)" "${W2}"
 mb assign "${G}" --bot "${E2E_ASSIGNEE}"
 expect_ok "assign G"
 mb start "${G}"
@@ -83,7 +87,7 @@ mb status "${D}" 已完成 --note "子任务D通过"
 expect_ok "status D 已完成"
 check "已通知" "$(j .data.notified)" "true"
 
-case_begin "A10 根任务完成，向来源群汇报"
+case_begin "A10 根任务完成，在根群汇报"
 mb status "${ROOT}" 已完成 --note "全部通过"
 expect_ok "status 根任务 已完成"
 check "已通知" "$(j .data.notified)" "true"

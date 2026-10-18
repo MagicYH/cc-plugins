@@ -4,6 +4,7 @@ source "$(dirname "$0")/../lib.sh"
 
 TITLE="e2e 根任务 ${RUN_TAG}"
 PROGRESS_RE='^\[[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}\] '
+SOURCE_NAME=$(chat_field "${E2E_SOURCE_CHAT}" name)
 
 case_begin "R1 创建根任务并写入全部字段"
 if [[ -n ${E2E_DISPATCHER} ]]; then
@@ -13,16 +14,18 @@ else
 fi
 expect_ok "init"
 ROOT=$(j .data.task_id)
+check "返回根群" "$(j .data.chat_id)" "${E2E_SOURCE_CHAT}"
 mb show "${ROOT}"
 expect_ok "show"
+check "工作群是当前群" "$(j .data.work_chat.chat_id)" "${E2E_SOURCE_CHAT}"
 check "负责人" "$(j .data.owner)" "${E2E_APP_ID}"
 check "状态" "$(j .data.status)" "进行中"
 check "优先级" "$(j .data.priority)" "高"
 check "标题" "$(j .data.title)" "${TITLE}"
 check_match "当前进展" "$(j .data.progress)" "${PROGRESS_RE}进行中：创建任务$"
 check "没有父任务" "$(j .data.parent)" "null"
-check "没有工作群" "$(j .data.work_chat)" "null"
 check "子任务数" "$(j .data.children.total)" "0"
+check "根群的群名没有被改" "$(chat_field "${E2E_SOURCE_CHAT}" name)" "${SOURCE_NAME}"
 if [[ -n ${E2E_DISPATCHER} ]]; then
   check "派发人" "$(j .data.dispatcher.open_id)" "${E2E_DISPATCHER}"
 else
@@ -54,7 +57,8 @@ check "状态不变" "$(j .data.status)" "进行中"
 case_begin "R5 根任务改为阻塞"
 mb status "${ROOT}" 阻塞 --note "等待依赖"
 expect_ok "status 阻塞"
-check "没有工作群时不通知" "$(j .data.notified)" "false"
+check "已通知" "$(j .data.notified)" "true"
+check "根群里有受阻消息" "$(chat_has "${E2E_SOURCE_CHAT}" "任务「${TITLE}」（${ROOT}）受阻：等待依赖")" "yes"
 mb show "${ROOT}"
 check "状态" "$(j .data.status)" "阻塞"
 check_match "当前进展" "$(j .data.progress)" "${PROGRESS_RE}阻塞：等待依赖$"
@@ -80,7 +84,11 @@ check "产出" "$(j .data.output)" "https://example.com/mr/1"
 case_begin "R9 没有子任务的根任务直接完成"
 mb status "${ROOT}" 已完成 --note "全部完成"
 expect_ok "status 已完成"
-check "没有工作群时不通知" "$(j .data.notified)" "false"
+check "已通知" "$(j .data.notified)" "true"
+check "根群里有完成消息" "$(chat_has "${E2E_SOURCE_CHAT}" "任务「${TITLE}」（${ROOT}）已完成：全部完成")" "yes"
+if [[ -n ${E2E_DISPATCHER} ]]; then
+  check "完成消息 @ 了派发人" "$(chat_has "${E2E_SOURCE_CHAT}" "（${ROOT}）已完成：全部完成" mention)" "yes"
+fi
 mb show "${ROOT}"
 check "状态" "$(j .data.status)" "已完成"
 
