@@ -1,3 +1,14 @@
 {
-  "hooks": {}
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/lib/hooks/stop-botmux-reply.js\""
+          }
+        ]
+      }
+    ]
+  }
 }

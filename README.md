@@ -17,10 +17,21 @@ cc-plugins/
 │       ├── agents/             # 子代理（*.md）
 │       ├── skills/             # 技能（<skill-name>/SKILL.md）
 │       ├── hooks/
-│       │   └── hooks.json      # 钩子配置
+│       │   └── hooks.json      # 钩子配置（只放配置，不放脚本）
+│       ├── lib/
+│       │   └── hooks/          # 钩子执行的脚本
 │       └── README.md
 └── README.md
 ```
+
+## 钩子开发约定
+
+- 钩子脚本放在 `lib/hooks/`，`hooks/hooks.json` 中通过 `${CLAUDE_PLUGIN_ROOT}/lib/hooks/<脚本>` 引用。
+- 要把信息写入 Claude 的上下文，按事件选择输出方式：
+  - Stop：退出码 0，stdout 输出 `{"decision":"block","reason":"..."}`，`reason` 会交给 Claude 并让它继续一轮；或退出码 2，提示写到 stderr。
+  - SessionStart、UserPromptSubmit、PostToolUse 等：可用 `hookSpecificOutput.additionalContext`。Stop 事件不支持该字段。
+  - 普通 stdout 文本只显示给用户，Claude 看不到。
+- Stop 钩子必须检查输入中的 `stop_hook_active`：为 true 时说明本轮已被拦过一次，应直接放行，避免反复注入。
 
 ## 添加新插件
 
