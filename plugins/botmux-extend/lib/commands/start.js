@@ -17,6 +17,7 @@ export async function run({ positionals }, ctx) {
   await ctx.board.updateTask(id, {
     status: Status.IN_PROGRESS,
     progress: formatProgress(Status.IN_PROGRESS, '开始处理', ctx.now()),
+    hostname: ctx.env.hostname,
   });
   return { task_id: id, status: Status.IN_PROGRESS };
 }

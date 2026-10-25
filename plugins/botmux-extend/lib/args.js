@@ -1,7 +1,10 @@
 import { MuxError, ErrorCode } from './errors.js';
 
+/** 不带取值的开关参数，出现即为 'true'。 */
+const SWITCHES = ['ready', 'help'];
+
 /**
- * 解析命令行参数。`--key value` 和 `--key=value` 都支持；其余是位置参数。
+ * 解析命令行参数。`--key value` 和 `--key=value` 都支持；SWITCHES 里的参数不带取值；其余是位置参数。
  * @param {string[]} argv 不含 node 和脚本路径
  * @returns {{command: string|undefined, positionals: string[], flags: Record<string,string>}}
  */
@@ -17,6 +20,10 @@ export function parseArgs(argv) {
     const eq = arg.indexOf('=');
     if (eq !== -1) {
       flags[arg.slice(2, eq)] = arg.slice(eq + 1);
+      continue;
+    }
+    if (SWITCHES.includes(arg.slice(2))) {
+      flags[arg.slice(2)] = 'true';
       continue;
     }
     const next = argv[i + 1];

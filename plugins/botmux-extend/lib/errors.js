@@ -12,6 +12,7 @@ export class MuxError extends Error {
 
 export const ErrorCode = Object.freeze({
   NOT_IN_BOTMUX: 'not_in_botmux',
+  BOARD_NOT_INITIALIZED: 'board_not_initialized',
   NOT_GROUP_CHAT: 'not_group_chat',
   INVALID_ARGS: 'invalid_args',
   NOT_FOUND: 'not_found',
@@ -20,5 +21,11 @@ export const ErrorCode = Object.freeze({
   CHILDREN_UNFINISHED: 'children_unfinished',
   NO_WORK_CHAT: 'no_work_chat',
   BOT_UNRESOLVED: 'bot_unresolved',
+  ALREADY_ASSIGNED: 'already_assigned',
+  DEPS_UNFINISHED: 'deps_unfinished',
+  BOT_BUSY: 'bot_busy',
+  NOT_DISPATCHER: 'not_dispatcher',
+  NOT_ASSIGNED: 'not_assigned',
+  TASK_DONE: 'task_done',
   LARK_ERROR: 'lark_error',
 });

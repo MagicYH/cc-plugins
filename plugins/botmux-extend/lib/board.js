@@ -8,6 +8,7 @@
 // - 列表：`base +record-list --base-token B --table-id T --format json
 //   --filter-json '{"logic":"and","conditions":[["<父任务字段ID>","intersects",[{"id":"recXXX"}]]]}'`
 //   返回结构同上（无 record_not_found）。`--format json` 默认最多 100 条，用 `--limit 200`。
+//   文本字段（负责人）按值精确过滤用 `["<字段ID>","==","cli_x"]`（2026-10-25 实测）。
 // - 新建：`base +record-upsert --base-token B --table-id T --json '<字段ID→值>'`
 //   返回 data = { created: true, record: { record_id_list: ["recXXX"] } }。
 // - 更新：同上加 `--record-id R`，只写传入的字段。
@@ -16,7 +17,7 @@
 //   select（状态、优先级）→ ["进行中"] 或 []，写入也用数组
 //   user（派发人）→ [{"id":"ou_x","name":"张三"}]，写入用 [{"id":"ou_x"}]
 //   group_chat（工作群）→ [{"id":"oc_x","name":"群名"}]，写入用 [{"id":"oc_x"}]
-//   link（父任务）→ [{"id":"recX"}]，写入同样格式
+//   link（父任务、依赖）→ [{"id":"recX"}, ...]，写入同样格式
 //   updated_at（修改时间）→ "2026-10-17T16:05:12.000+04:00"，只读
 
 import { MuxError, ErrorCode } from './errors.js';
@@ -36,6 +37,8 @@ import { MuxError, ErrorCode } from './errors.js';
  * @property {string|null} parent_id
  * @property {{open_id: string, name: string|null}|null} dispatcher  派发人
  * @property {string|null} updated_at
+ * @property {string|null} hostname      最近一次操作该任务的 bot 所在主机
+ * @property {string[]} deps              依赖的任务 ID，全部完成后才能分派
  */
 
 /**
@@ -52,19 +55,22 @@ import { MuxError, ErrorCode } from './errors.js';
  * @property {string} [work_chat_id]
  * @property {string} [parent_id]
  * @property {string} [dispatcher_open_id]
+ * @property {string} [hostname]
+ * @property {string[]} [deps]
  */
 
 /**
  * @typedef {Object} Board
  * @property {(taskId: string) => Promise<Task>} getTask  不存在时抛 not_found
  * @property {(taskId: string, opts?: {status?: string}) => Promise<Task[]>} listChildren  直接子任务
+ * @property {(appId: string, opts?: {statuses?: string[]}) => Promise<Task[]>} listByOwner  负责人是该 bot 的任务
  * @property {(patch: TaskPatch) => Promise<string>} createTask  返回新记录 ID
  * @property {(taskId: string, patch: TaskPatch) => Promise<void>} updateTask
  */
 
 /**
  * @param {import('./lark.js').LarkRunner} run
- * @param {{base_token: string, table_id: string, fields: Record<string,string>}} config  config/board.json
+ * @param {import('./config.js').BoardConfig} config  用户配置，见 config.js
  * @returns {Board}
  */
 export function createBoard(run, config) {
@@ -78,7 +84,7 @@ export function createBoard(run, config) {
     const task = {
       task_id: taskId, title: null, desc: null, criteria: null, priority: null, status: null,
       owner: null, progress: null, output: null, work_chat: null, parent_id: null,
-      dispatcher: null, updated_at: null,
+      dispatcher: null, updated_at: null, hostname: null, deps: [],
     };
     fieldIdList.forEach((fid, i) => {
       const name = idToName[fid];
@@ -95,6 +101,9 @@ export function createBoard(run, config) {
         case 'parent':
           task.parent_id = cell?.[0]?.id ?? null;
           break;
+        case 'deps':
+          task.deps = (cell ?? []).map((r) => r.id);
+          break;
         case 'dispatcher':
           task.dispatcher = cell?.[0] ? { open_id: cell[0].id, name: cell[0].name ?? null } : null;
           break;
@@ -109,6 +118,7 @@ export function createBoard(run, config) {
   const asText = (v) => v;
   const asSelect = (v) => (v === null ? null : [v]);
   const asRef = (v) => (v === null ? null : [{ id: v }]);
+  const asRefs = (v) => (v === null ? null : v.map((id) => ({ id })));
   const WRITERS = {
     title: ['title', asText],
     desc: ['desc', asText],
@@ -121,18 +131,31 @@ export function createBoard(run, config) {
     work_chat_id: ['work_chat', asRef],
     parent_id: ['parent', asRef],
     dispatcher_open_id: ['dispatcher', asRef],
+    hostname: ['hostname', asText],
+    deps: ['deps', asRefs],
   };
 
-  // TaskPatch → 字段ID→单元格值，只包含 patch 里出现的键
+  // TaskPatch → 字段ID→单元格值，只包含 patch 里出现的键。
+  // 配置里没有的字段（旧配置缺 hostname、deps）直接跳过，不写入。
   function patchToCells(patch) {
     const cells = {};
     for (const [key, value] of Object.entries(patch)) {
       const writer = WRITERS[key];
       if (!writer) continue;
       const [name, format] = writer;
+      if (!fields[name]) continue;
       cells[fields[name]] = format(value);
     }
     return cells;
+  }
+
+  async function listWhere(conditions) {
+    const filter = { logic: 'and', conditions };
+    const data = await run([
+      'base', '+record-list', ...base, '--format', 'json', '--limit', '200',
+      '--filter-json', JSON.stringify(filter),
+    ]);
+    return (data.data ?? []).map((row, i) => rowToTask(data.record_id_list[i], row, data.field_id_list));
   }
 
   return {
@@ -148,12 +171,13 @@ export function createBoard(run, config) {
     async listChildren(taskId, opts = {}) {
       const conditions = [[fields.parent, 'intersects', [{ id: taskId }]]];
       if (opts.status) conditions.push([fields.status, 'intersects', [opts.status]]);
-      const filter = { logic: 'and', conditions };
-      const data = await run([
-        'base', '+record-list', ...base, '--format', 'json', '--limit', '200',
-        '--filter-json', JSON.stringify(filter),
-      ]);
-      return (data.data ?? []).map((row, i) => rowToTask(data.record_id_list[i], row, data.field_id_list));
+      return listWhere(conditions);
+    },
+
+    async listByOwner(appId, opts = {}) {
+      const conditions = [[fields.owner, '==', appId]];
+      if (opts.statuses) conditions.push([fields.status, 'intersects', opts.statuses]);
+      return listWhere(conditions);
     },
 
     async createTask(patch) {

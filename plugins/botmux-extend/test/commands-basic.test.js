@@ -25,7 +25,7 @@ test('init 写入任务字段，工作群是当前群，派发人优先用 --fro
   const ctx = makeCtx({ board, chat: groupChat() });
   const result = await init({ positionals: [], flags: { ...FLAGS, from: 'ou_sender' } }, ctx);
 
-  assert.deepEqual(result, { task_id: 'recNew', chat_id: 'oc_current' });
+  assert.deepEqual(result, { task_id: 'recNew', chat_id: 'oc_current', url: null });
   assert.deepEqual(created[0], {
     title: '登录功能',
     desc: '参考文档 https://x',
@@ -35,6 +35,7 @@ test('init 写入任务字段，工作群是当前群，派发人优先用 --fro
     owner: 'cli_self',
     progress: '[10-17 15:30] 进行中：创建任务',
     work_chat_id: 'oc_current',
+    hostname: 'host-a',
     dispatcher_open_id: 'ou_sender',
   });
 });
@@ -51,6 +52,45 @@ test('init 派发人都没有时不写 dispatcher_open_id', async () => {
   const ctx = makeCtx({ board, chat: groupChat(), env: { ownerOpenId: undefined } });
   await init({ positionals: [], flags: FLAGS }, ctx);
   assert.equal('dispatcher_open_id' in created[0], false);
+});
+
+test('init 已有看板时直接使用，把看板链接发到当前群并在输出里带上', async () => {
+  const { created, board } = recordingBoard();
+  const sent = [];
+  const chat = { ...groupChat(), send: async (chatId, text) => (sent.push({ chatId, text }), 'om_1') };
+  const ctx = makeCtx({ board, boardUrl: 'https://x.feishu.cn/base/basA', chat });
+
+  const result = await init({ positionals: [], flags: FLAGS }, ctx);
+
+  assert.equal(created.length, 1);
+  assert.deepEqual(result, { task_id: 'recNew', chat_id: 'oc_current', url: 'https://x.feishu.cn/base/basA' });
+  assert.deepEqual(sent, [{
+    chatId: 'oc_current',
+    text: '已创建根任务「登录功能」（recNew），任务看板：https://x.feishu.cn/base/basA',
+  }]);
+});
+
+test('init 没有看板时先新建，再在新看板上创建根任务并发链接', async () => {
+  const { created, board } = recordingBoard();
+  const sent = [];
+  let provisioned = 0;
+  const ctx = makeCtx({
+    board: null,
+    provisionBoard: async () => (provisioned++, { board, url: 'https://x.feishu.cn/base/basNew' }),
+    chat: { ...groupChat(), send: async (chatId, text) => (sent.push(text), 'om_1') },
+  });
+
+  const result = await init({ positionals: [], flags: FLAGS }, ctx);
+
+  assert.equal(provisioned, 1);
+  assert.equal(created.length, 1);
+  assert.equal(result.url, 'https://x.feishu.cn/base/basNew');
+  assert.match(sent[0], /任务看板：https:\/\/x\.feishu\.cn\/base\/basNew$/);
+});
+
+test('init 没有看板且当前不是普通群时，不新建看板', async () => {
+  const ctx = makeCtx({ board: null, chat: groupChat({ chat_mode: 'topic' }) });
+  await assert.rejects(init({ positionals: [], flags: FLAGS }, ctx), { code: 'not_group_chat' });
 });
 
 test('init 单聊时抛 not_group_chat，不读群信息也不写看板', async () => {
@@ -104,7 +144,7 @@ test('init 优先级不合法时抛 invalid_args', async () => {
 test('show 返回详情，并统计子任务数量', async () => {
   const ctx = makeCtx({
     board: {
-      getTask: async (id) => task({ task_id: id, title: '用户系统', status: '进行中' }),
+      getTask: async (id) => task({ task_id: id, title: '用户系统', status: '进行中', hostname: 'host-b' }),
       listChildren: async () => [
         task({ task_id: 'recA', status: '已完成' }),
         task({ task_id: 'recB', status: '进行中' }),
@@ -114,6 +154,7 @@ test('show 返回详情，并统计子任务数量', async () => {
   });
   const data = await show({ positionals: ['recParent'], flags: {} }, ctx);
   assert.equal(data.task_id, 'recParent');
+  assert.equal(data.hostname, 'host-b');
   assert.equal(data.parent, null);
   assert.deepEqual(data.children, { total: 3, done: 2 });
 });
@@ -155,7 +196,7 @@ test('start 待分配的任务改为进行中并写进展', async () => {
   const data = await start({ positionals: ['recT'], flags: {} }, ctx);
   assert.deepEqual(data, { task_id: 'recT', status: '进行中' });
   assert.deepEqual(updates, [
-    ['recT', { status: '进行中', progress: '[10-17 15:30] 进行中：开始处理' }],
+    ['recT', { status: '进行中', progress: '[10-17 15:30] 进行中：开始处理', hostname: 'host-a' }],
   ]);
 });
 
@@ -186,15 +227,60 @@ test('children 返回子任务列表并透传 status 过滤', async () => {
       getTask: async () => task(),
       listChildren: async (...args) => {
         calls.push(args);
-        return [task({ task_id: 'recA', title: '子', owner: 'cli_x', status: '进行中', progress: 'p', output: null, updated_at: 'u' })];
+        return [task({ task_id: 'recA', title: '子', owner: 'cli_x', status: '进行中', progress: 'p', output: null, updated_at: 'u', hostname: 'host-b' })];
       },
     },
   });
   const data = await children({ positionals: ['recP'], flags: { status: '进行中' } }, ctx);
   assert.deepEqual(calls, [['recP', { status: '进行中' }]]);
   assert.deepEqual(data, {
-    children: [{ task_id: 'recA', title: '子', owner: 'cli_x', status: '进行中', progress: 'p', output: null, updated_at: 'u' }],
+    children: [{
+      task_id: 'recA', title: '子', priority: '中', owner: 'cli_x', status: '进行中', deps: [], ready: false,
+      progress: 'p', output: null, updated_at: 'u', hostname: 'host-b',
+    }],
   });
+});
+
+/** children 调度用例的子任务列表：创建顺序 A→E。 */
+function scheduleList() {
+  return [
+    task({ task_id: 'recA', status: '已完成', priority: '高', owner: 'cli_1' }),
+    task({ task_id: 'recB', status: '待分配', priority: '低', owner: null, deps: ['recA'] }),
+    task({ task_id: 'recC', status: '待分配', priority: '高', owner: null, deps: ['recD'] }),
+    task({ task_id: 'recD', status: '进行中', priority: '中', owner: 'cli_2' }),
+    task({ task_id: 'recE', status: '待分配', priority: '高', owner: null }),
+    task({ task_id: 'recF', status: '待分配', priority: '高', owner: 'cli_3' }),
+  ];
+}
+
+test('children 计算 ready，并按 ready → 优先级 → 创建顺序排序', async () => {
+  const ctx = makeCtx({ board: { getTask: async () => task(), listChildren: async () => scheduleList() } });
+  const data = await children({ positionals: ['recP'], flags: {} }, ctx);
+  // ready：E（高）、B（低，依赖 A 已完成）；C 依赖 D 未完成；F 已派发未开始
+  assert.deepEqual(data.children.map((c) => [c.task_id, c.ready]), [
+    ['recE', true], ['recB', true],
+    ['recA', false], ['recC', false], ['recF', false], ['recD', false],
+  ]);
+  assert.deepEqual(data.children.find((c) => c.task_id === 'recB').deps, ['recA']);
+});
+
+test('children --ready 只输出可派发的子任务', async () => {
+  const ctx = makeCtx({ board: { getTask: async () => task(), listChildren: async () => scheduleList() } });
+  const data = await children({ positionals: ['recP'], flags: { ready: 'true' } }, ctx);
+  assert.deepEqual(data.children.map((c) => c.task_id), ['recE', 'recB']);
+});
+
+test('children 带 --status 时，不在列表里的依赖单独查询状态', async () => {
+  const queried = [];
+  const ctx = makeCtx({
+    board: {
+      getTask: async (id) => (queried.push(id), task({ task_id: id, status: id === 'recA' ? '已完成' : '进行中' })),
+      listChildren: async () => [task({ task_id: 'recB', status: '待分配', owner: null, deps: ['recA'] })],
+    },
+  });
+  const data = await children({ positionals: ['recP'], flags: { status: '待分配' } }, ctx);
+  assert.deepEqual(queried, ['recP', 'recA']);
+  assert.equal(data.children[0].ready, true);
 });
 
 test('children 没传 --status 时不带过滤条件', async () => {
@@ -224,7 +310,7 @@ test('output 写入产出字段', async () => {
   });
   const data = await output({ positionals: ['recT', 'https://mr/1'], flags: {} }, ctx);
   assert.deepEqual(data, { task_id: 'recT' });
-  assert.deepEqual(updates, [['recT', { output: 'https://mr/1' }]]);
+  assert.deepEqual(updates, [['recT', { output: 'https://mr/1', hostname: 'host-a' }]]);
 });
 
 test('output 缺少内容时抛 invalid_args，且不写入', async () => {

@@ -28,6 +28,8 @@ export async function run({ positionals }, ctx) {
     work_chat: t.work_chat,
     dispatcher: t.dispatcher,
     updated_at: t.updated_at,
+    hostname: t.hostname,
+    deps: t.deps,
     parent,
     children: {
       total: children.length,

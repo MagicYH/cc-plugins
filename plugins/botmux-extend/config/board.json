@@ -1,18 +1,58 @@
 {
-  "base_token": "KpbybB1JPaWVtYsB6r8c4UZdnkg",
-  "table_id": "tblqY5Msqv9tDBWI",
+  "base_name": "任务看板",
+  "table_name": "任务",
   "fields": {
-    "title": "fldDa07B7G",
-    "desc": "fldW79g4H9",
-    "status": "fldZTEiywf",
-    "priority": "fldLxu5DPC",
-    "owner": "fldPKudYmh",
-    "parent": "fldhZR2aJp",
-    "work_chat": "fldnCfUCxW",
-    "criteria": "fldfuR0nmi",
-    "progress": "fldMc28yQk",
-    "output": "fldgNsHCoP",
-    "updated_at": "fldZfhlB8N",
-    "dispatcher": "fldEuP2QPm"
+    "title": { "name": "任务标题", "type": "text" },
+    "desc": { "name": "任务描述", "type": "text" },
+    "status": {
+      "name": "任务状态",
+      "type": "select",
+      "multiple": false,
+      "options": [
+        { "name": "待分配", "hue": "Green" },
+        { "name": "进行中", "hue": "Yellow" },
+        { "name": "阻塞", "hue": "Yellow" },
+        { "name": "已完成", "hue": "Blue" }
+      ]
+    },
+    "priority": {
+      "name": "优先级",
+      "type": "select",
+      "multiple": false,
+      "options": [
+        { "name": "高", "hue": "Green" },
+        { "name": "中", "hue": "Turquoise" },
+        { "name": "低", "hue": "Green" }
+      ]
+    },
+    "owner": { "name": "负责人", "type": "text" },
+    "parent": {
+      "name": "父任务",
+      "type": "link",
+      "bidirectional": true,
+      "bidirectional_link_field_name": "子任务"
+    },
+    "work_chat": { "name": "工作群", "type": "group_chat", "multiple": false },
+    "criteria": { "name": "准出标准", "type": "text" },
+    "progress": { "name": "当前进展", "type": "text" },
+    "output": { "name": "产出", "type": "text" },
+    "updated_at": { "name": "修改时间", "type": "updated_at", "style": { "format": "yyyy/MM/dd HH:mm" } },
+    "dispatcher": {
+      "name": "派发人",
+      "type": "user",
+      "multiple": false,
+      "description": "只有根任务填，是派发任务的人；根任务完成时 @ 这个人"
+    },
+    "hostname": {
+      "name": "主机",
+      "type": "text",
+      "description": "负责人 bot 最近一次操作该任务时所在的主机"
+    },
+    "deps": {
+      "name": "依赖",
+      "type": "link",
+      "bidirectional": false,
+      "description": "同一父任务下必须先完成的任务；全部完成后才能分派本任务"
+    }
   }
 }

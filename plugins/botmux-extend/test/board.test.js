@@ -48,6 +48,8 @@ test('getTask 把所有字段类型映射成 Task', async () => {
     parent_id: 'recP',
     dispatcher: { open_id: 'ou_1', name: '张三' },
     updated_at: '2026-10-17T16:05:12.000+04:00',
+    hostname: null,
+    deps: [],
   });
 });
 
@@ -133,4 +135,75 @@ test('updateTask 转换 patch：select 和引用写成数组，null 清空，只
     'base', '+record-upsert', ...BASE, '--record-id', 'recT',
     '--json', '{"fld_priority":["高"],"fld_disp":[{"id":"ou_2"}],"fld_progress":null,"fld_output":"完成"}',
   ]);
+});
+
+test('hostname：配置里有该字段时按文本读写', async () => {
+  const withHost = { ...config, fields: { ...config.fields, hostname: 'fld_host' } };
+  const { run, calls } = fakeRunner([
+    { data: [['host-b']], field_id_list: ['fld_host'], record_id_list: ['recT'] },
+    { updated: true },
+  ]);
+  const board = createBoard(run, withHost);
+
+  assert.equal((await board.getTask('recT')).hostname, 'host-b');
+  await board.updateTask('recT', { status: '进行中', hostname: 'host-a' });
+  assert.deepEqual(calls[1].slice(-2), ['--json', '{"fld_status":["进行中"],"fld_host":"host-a"}']);
+});
+
+test('hostname：旧配置没有该字段时跳过写入，读取为 null', async () => {
+  const { run, calls } = fakeRunner([
+    { updated: true },
+    { data: [['A']], field_id_list: ['fld_title'], record_id_list: ['recT'] },
+  ]);
+  const board = createBoard(run, config);
+
+  await board.updateTask('recT', { output: '完成', hostname: 'host-a' });
+  assert.deepEqual(calls[0].slice(-2), ['--json', '{"fld_output":"完成"}']);
+  assert.equal((await board.getTask('recT')).hostname, null);
+});
+
+test('deps：读为任务 ID 数组，写入为引用数组', async () => {
+  const withDeps = { ...config, fields: { ...config.fields, deps: 'fld_deps' } };
+  const { run, calls } = fakeRunner([
+    { data: [[[{ id: 'recA' }, { id: 'recB' }]], [[]]], field_id_list: ['fld_deps'], record_id_list: ['recT', 'recU'] },
+    { created: true, record: { record_id_list: ['recNew'] } },
+  ]);
+  const board = createBoard(run, withDeps);
+
+  const [t, u] = await board.listChildren('recP');
+  assert.deepEqual(t.deps, ['recA', 'recB']);
+  assert.deepEqual(u.deps, []);
+  await board.createTask({ title: 'x', deps: ['recA'] });
+  assert.deepEqual(calls[1].slice(-2), ['--json', '{"fld_title":"x","fld_deps":[{"id":"recA"}]}']);
+});
+
+test('deps：旧配置没有该字段时跳过写入，读取为 []', async () => {
+  const { run, calls } = fakeRunner([
+    { updated: true },
+    { data: [['A']], field_id_list: ['fld_title'], record_id_list: ['recT'] },
+  ]);
+  const board = createBoard(run, config);
+
+  await board.updateTask('recT', { title: 'A', deps: ['recA'] });
+  assert.deepEqual(calls[0].slice(-2), ['--json', '{"fld_title":"A"}']);
+  assert.deepEqual((await board.getTask('recT')).deps, []);
+});
+
+test('listByOwner 按负责人精确过滤，可加状态条件', async () => {
+  const { run, calls } = fakeRunner([
+    { data: [['A']], field_id_list: ['fld_title'], record_id_list: ['recA'] },
+    { data: [], field_id_list: [], record_id_list: [] },
+  ]);
+  const board = createBoard(run, config);
+
+  const tasks = await board.listByOwner('cli_x', { statuses: ['待分配', '进行中', '阻塞'] });
+  assert.deepEqual(calls[0], [
+    'base', '+record-list', ...BASE, '--format', 'json', '--limit', '200',
+    '--filter-json',
+    '{"logic":"and","conditions":[["fld_owner","==","cli_x"],["fld_status","intersects",["待分配","进行中","阻塞"]]]}',
+  ]);
+  assert.deepEqual(tasks.map((t) => t.task_id), ['recA']);
+
+  await board.listByOwner('cli_y');
+  assert.equal(calls[1].at(-1), '{"logic":"and","conditions":[["fld_owner","==","cli_y"]]}');
 });

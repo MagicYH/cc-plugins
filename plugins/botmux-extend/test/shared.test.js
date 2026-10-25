@@ -13,12 +13,27 @@ test('parseArgs 拆分命令、位置参数和 flag', () => {
   });
 });
 
+test('parseArgs 开关参数 --ready 不带取值', () => {
+  assert.deepEqual(parseArgs(['children', 'recP', '--ready']), {
+    command: 'children', positionals: ['recP'], flags: { ready: 'true' },
+  });
+  assert.deepEqual(parseArgs(['children', '--ready', 'recP']).positionals, ['recP']);
+});
+
+test('parseArgs --help 不带取值', () => {
+  assert.deepEqual(parseArgs(['--help']), { command: undefined, positionals: [], flags: { help: 'true' } });
+});
+
 test('parseArgs 遇到缺值的 flag 抛 invalid_args', () => {
   assert.throws(() => parseArgs(['init', '--title']), { code: 'invalid_args' });
 });
 
 test('formatProgress 生成 [MM-DD HH:mm] 状态：说明', () => {
   assert.equal(formatProgress('阻塞', '缺数据库地址', fixedNow()), '[10-17 15:30] 阻塞：缺数据库地址');
+});
+
+test('formatProgress 固定按东八区输出，与主机时区无关', () => {
+  assert.equal(formatProgress('进行中', 'x', new Date('2026-10-17T20:05:00Z')), '[10-18 04:05] 进行中：x');
 });
 
 test('群描述记下任务 ID 和上级群，且不超过 100 个字符', () => {

@@ -1,4 +1,5 @@
 // 测试共用的假对象。各测试文件按需覆盖其中的方法。
+import assert from 'node:assert/strict';
 
 /** 记录调用参数、按顺序返回预设结果的假 lark runner。 */
 export function fakeRunner(responses = []) {
@@ -13,15 +14,17 @@ export function fakeRunner(responses = []) {
   return { run, calls };
 }
 
-/** 测试用的固定时间：2026-10-17 15:30（本机时区）。 */
-export const fixedNow = () => new Date(2026, 9, 17, 15, 30);
+/** 测试用的固定时间：2026-10-17 15:30（东八区），即 07:30 UTC。 */
+export const fixedNow = () => new Date(Date.UTC(2026, 9, 17, 7, 30));
 
 /** 组装命令的 ctx。board / chat 传部分实现即可。 */
-export function makeCtx({ board = {}, chat = {}, env = {} } = {}) {
+export function makeCtx({ board = {}, boardUrl = null, provisionBoard, chat = {}, env = {} } = {}) {
   return {
     board,
+    boardUrl,
+    provisionBoard: provisionBoard ?? (async () => assert.fail('不应新建看板')),
     chat,
-    env: { appId: 'cli_self', chatId: 'oc_current', ownerOpenId: 'ou_owner', ...env },
+    env: { appId: 'cli_self', chatId: 'oc_current', ownerOpenId: 'ou_owner', hostname: 'host-a', ...env },
     now: fixedNow,
   };
 }
@@ -42,6 +45,8 @@ export function task(overrides = {}) {
     parent_id: null,
     dispatcher: null,
     updated_at: null,
+    hostname: null,
+    deps: [],
     ...overrides,
   };
 }

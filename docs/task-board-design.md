@@ -26,7 +26,7 @@ bot 之间 @ 的可行性已经验证（见第 7.2 节）。
 
 ## 2. 表结构
 
-数据表 `tblqY5Msqv9tDBWI`，所属 base `KpbybB1JPaWVtYsB6r8c4UZdnkg`。
+看板用哪张表记在用户配置 `~/.config/muxboard/board.json` 里（环境变量 `MUXBOARD_CONFIG` 可指定其他路径），内容是 base token、table ID、字段 ID 映射和表格链接。没有这个文件时，`muxboard init` 按插件自带的模板 `config/board.json` 新建一张表，见第 6.2 节「muxboard init」。下表的字段 ID 是本机现有看板（base `KpbybB1JPaWVtYsB6r8c4UZdnkg`，数据表 `tblqY5Msqv9tDBWI`）的，新建的表字段 ID 不同。
 
 CLI 内部用字段 ID 读写，不用字段名。字段名可以改，ID 不变。
 
@@ -46,6 +46,8 @@ CLI 内部用字段 ID 读写，不用字段名。字段名可以改，ID 不变
 | 产出 | `fldgNsHCoP` | 文本 | 暂保留为文本，后续改为附件 |
 | 修改时间 | `fldZfhlB8N` | 修改时间 | 系统自动维护，用来发现长时间没有更新的任务 |
 | 派发人 | `fldEuP2QPm` | 人员 | 只有根任务填，是派发任务的人；根任务完成时 @ 这个人 |
+| 主机 | `fld7ju2EnA` | 文本 | 负责人 bot 最近一次操作该任务时所在的主机（`os.hostname()`），多 bot 跨主机协作时用来定位。`init`、`start`、`split`、`status`、`output` 写入；`add`、`assign` 由父任务的 bot 执行，不写。旧配置里没有这个字段时跳过写入，读出为 null |
+| 依赖 | `fldxiyUgLK` | 关联（单向，可多选） | 同一父任务下必须先完成的任务，`add --deps` 写入。依赖全部完成后才能 `assign`。旧配置里没有这个字段时按没有依赖处理，写入时跳过 |
 
 ## 3. 任务状态
 
@@ -96,7 +98,7 @@ CLI 内部用字段 ID 读写，不用字段名。字段名可以改，ID 不变
 2. CLI 以这个 bot 的身份发汇报消息，消息里带任务 ID 和查看命令：
    - 子任务：发到父任务的工作群，@ 父任务的 bot。
    - 根任务：发到根群，@ 派发人。
-3. 父任务的 bot 收到消息后，自己用 `muxboard children <父任务ID>` 检查所有子任务的状态，再决定下一步：继续等、追加任务，或者确认完成后把父任务设为已完成。父任务设为已完成时，按第 2 步继续往上汇报。
+3. 父任务的 bot 收到消息后，自己用 `muxboard children <父任务ID>` 检查所有子任务的状态，再决定下一步：用 `muxboard children <父任务ID> --ready` 派发下一个可派发任务、继续等、追加任务，或者确认完成后把父任务设为已完成。父任务设为已完成时，按第 2 步继续往上汇报。
 
 **工作群**
 
@@ -124,7 +126,9 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 **依赖关系**
 
 - 父任务等所有子任务完成后才能完成。
-- 子任务之间的先后顺序（比如先后端、后前端）不在表里表达，由父任务的 bot 控制分派时机：前一个完成后再分派下一个。
+- 子任务之间的先后顺序（比如先总设计、后各模块）记在"依赖"字段里：`add --deps` 写入，`assign` 时检查依赖是否全部完成，没完成报 `deps_unfinished`。计划保存在看板上，父任务的 bot 换会话后用 `children --ready` 读回可派发的任务。
+- 一个 bot 同一时间只处理一个任务：`assign` 时目标 bot 有占用中的任务就报 `bot_busy`。占用指负责人是该 bot、状态为待分配（已派发未开始）、进行中或阻塞，且这个任务没有子任务；有子任务的任务是在协调，不算占用。
+- 已派发（有负责人）或不是待分配的子任务不能再 `assign`，报 `already_assigned`。需要改派时（比如负责 bot 失联），父任务的 bot 先用 `unassign` 收回，再重新 `assign`。
 
 ## 6. CLI 设计
 
@@ -136,7 +140,8 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 | `BOTMUX_CHAT_ID` | botmux 注入 | 当前群 ID，`init` 时作为根群 |
 | `BOTMUX_CHAT_TYPE` | botmux 注入 | 当前会话类型（`group` / `p2p`），`init` 时为 `p2p` 直接拒绝 |
 | `lark-cli` | 本机已安装 | 读写看板、建群、查群成员、发消息，统一 `--as bot` |
-| 配置文件 | 插件自带 | base token、table ID、字段 ID 映射 |
+| 看板配置 | `~/.config/muxboard/board.json`，`MUXBOARD_CONFIG` 可覆盖 | base token、table ID、字段 ID 映射、表格链接。缺失时只有 `init` 能执行，其他命令返回 `board_not_initialized` |
+| 表结构模板 | 插件自带 `config/board.json` | 新建看板时的字段名、类型和单选选项，不含 ID |
 
 缺少环境变量时，所有命令返回错误 `not_in_botmux`。
 
@@ -149,10 +154,11 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 | `muxboard init` | 创建根任务 | 收到人派发任务的初始 bot |
 | `muxboard show <任务ID>` | 查看任务详情 | 所有 bot |
 | `muxboard start <任务ID>` | 开始处理分派给自己的任务 | 被分派的 bot |
-| `muxboard children <任务ID>` | 查看子任务列表 | 父任务的 bot |
+| `muxboard children <任务ID>` | 查看子任务列表和可派发的任务 | 父任务的 bot |
 | `muxboard add <父任务ID>` | 创建子任务 | 父任务的 bot |
 | `muxboard split <任务ID>` | 为要继续拆分的任务新建工作群，拉入上级群的人和 bot | 子任务的 bot |
 | `muxboard assign <子任务ID>` | 把子任务分给某个 bot，在工作群里 @ 它 | 父任务的 bot |
+| `muxboard unassign <子任务ID>` | 收回已分派的子任务：清空负责人、改回待分配，通知原负责 bot | 父任务的 bot |
 | `muxboard status <任务ID> <状态>` | 更新状态；阻塞或完成时向上级群汇报 | 负责人 bot |
 | `muxboard output <任务ID> <内容>` | 写入产出 | 负责人 bot |
 
@@ -179,7 +185,16 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 
 这个 open_id 属于根任务 bot 的应用。根任务完成时由同一个 bot 发汇报消息，所以可以直接用它 @ 派发人。
 
-输出：`{"ok": true, "data": {"task_id": "recXXX", "chat_id": "oc_xxx"}}`。`chat_id` 是根群。
+看板配置不存在时，确认是普通群后先新建看板：
+
+1. 以 bot 身份按模板 `config/board.json` 新建多维表格和数据表（`base +base-create`，再用 `+field-create` 补建指向本表的"父任务"双向关联和"依赖"单向关联）。
+2. 用 `+field-list` 按字段名读回字段 ID，用 `+base-get` 读表格链接。
+3. 给会话发起人（`BOTMUX_OWNER_OPEN_ID`）加管理权限（`drive +member-add --perm full_access`）。
+4. 把 base token、table ID、字段 ID 和链接写入看板配置，之后的命令都用这张表。
+
+创建根任务后，在根群发一条消息，带上任务 ID 和看板链接。
+
+输出：`{"ok": true, "data": {"task_id": "recXXX", "chat_id": "oc_xxx", "url": "https://.../base/xxx"}}`。`chat_id` 是根群，`url` 是看板链接（配置里没有链接时为 null，也不发消息）。
 
 错误：缺少 `BOTMUX_CHAT_ID` → `not_in_botmux`；当前会话不是普通群 → `not_group_chat`。
 
@@ -205,6 +220,8 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
     "work_chat": null,
     "dispatcher": null,
     "updated_at": "2026-10-17T15:30:00.000+08:00",
+    "hostname": "mac-mini",
+    "deps": ["recXXX"],
     "parent": {"task_id": "recYYY", "title": "用户系统", "owner": "cli_yyy", "status": "进行中"},
     "children": {"total": 0, "done": 0}
   }
@@ -223,11 +240,12 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 
 #### `muxboard children <任务ID>`
 
-列出直接子任务。
+列出直接子任务。`ready` 为 true 表示可以立即分派：状态为待分配、没有负责人、依赖全部已完成。排序：可派发的在前，再按优先级（高 → 中 → 低），最后按创建顺序。
 
 | 参数 | 必填 | 说明 |
 | --- | --- | --- |
 | `--status <状态>` | 否 | 只看某个状态的子任务 |
+| `--ready` | 否 | 只看可派发的子任务，不带取值 |
 
 输出：
 
@@ -236,8 +254,9 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
   "ok": true,
   "data": {
     "children": [
-      {"task_id": "recZZZ", "title": "实现登录接口", "owner": "cli_xxx", "status": "进行中",
-       "progress": "[10-17 15:30] 进行中：开始处理", "output": null, "updated_at": "2026-10-17T15:30:00.000+08:00"}
+      {"task_id": "recZZZ", "title": "实现登录接口", "priority": "中", "owner": "cli_xxx", "status": "进行中",
+       "deps": ["recXXX"], "ready": false,
+       "progress": "[10-17 15:30] 进行中：开始处理", "output": null, "updated_at": "2026-10-17T15:30:00.000+08:00", "hostname": "mac-mini"}
     ]
   }
 }
@@ -256,10 +275,11 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 | `--desc <文本>` | 是 | 描述，参考文档的链接写在这里 |
 | `--criteria <文本>` | 是 | 准出标准 |
 | `--priority <高\|中\|低>` | 否 | 优先级，默认"中" |
+| `--deps <ID,ID>` | 否 | 依赖的任务 ID，逗号分隔，必须是同一父任务下的子任务 |
 
 输出：`{"ok": true, "data": {"task_id": "recZZZ", "chat_id": "oc_xxx"}}`。`chat_id` 是父任务的工作群，子任务会在这个群里分派。
 
-错误：`not_found`；父任务没有工作群 → `no_work_chat`（提示先执行 `split`）。
+错误：`not_found`（父任务或依赖不存在）；父任务没有工作群 → `no_work_chat`（提示先执行 `split`）；依赖不是同一父任务的子任务 → `invalid_args`。
 
 #### `muxboard split <任务ID>`
 
@@ -283,7 +303,13 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 
 #### `muxboard assign <子任务ID>`
 
-把子任务分给某个 bot：写负责人，把目标 bot 拉进父任务的工作群，并在群里 @ 它。状态保持待分配。同一个子任务可以重新分派给另一个 bot（改派），CLI 覆盖负责人。
+把子任务分给某个 bot：写负责人，把目标 bot 拉进父任务的工作群，并在群里 @ 它。状态保持待分配。
+
+拉人、写负责人之前依次检查，任一不满足就报错且不做任何改动：
+
+1. 子任务是待分配且没有负责人，否则 `already_assigned`。需要改派时先用 `muxboard unassign` 收回。
+2. 依赖全部已完成，否则 `deps_unfinished`，消息里列出未完成的依赖和状态。
+3. 目标 bot 没有占用中的任务（口径见第 5 节"依赖关系"），否则 `bot_busy`，消息里列出占用的任务。
 
 | 参数 | 必填 | 说明 |
 | --- | --- | --- |
@@ -299,7 +325,37 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 
 输出：`{"ok": true, "data": {"task_id": "recZZZ", "owner": "cli_xxx", "message_id": "om_xxx"}}`
 
-错误：`not_found`；父任务没有工作群 → `no_work_chat`；拉群后在群成员里仍找不到目标 bot → `bot_unresolved`。
+错误：`not_found`；父任务没有工作群 → `no_work_chat`；`already_assigned`；`deps_unfinished`；`bot_busy`；拉群后在群成员里仍找不到目标 bot → `bot_unresolved`。
+
+#### `muxboard unassign <子任务ID>`
+
+收回已分派的子任务，用于改派（比如负责 bot 失联、长时间无响应）：清空负责人，状态改回待分配，"当前进展"写入收回说明，并在父任务的工作群里通知原负责 bot 停止处理。"主机"字段保留，记录最后操作的主机。
+
+写看板之前依次检查，任一不满足就报错且不做任何改动：
+
+1. 子任务有父任务，否则 `no_work_chat`。
+2. 当前 bot 是父任务的负责人，否则 `not_dispatcher`。只有派发方能收回。
+3. 子任务不是已完成，否则 `task_done`。
+4. 子任务有负责人，否则 `not_assigned`。待分配、进行中、阻塞都可以收回。
+5. 父任务有工作群，否则 `no_work_chat`。
+
+原负责 bot 已不在工作群里时照样收回，消息里不 @ 它。
+
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `<子任务ID>` | 是 | 子任务的 ID |
+| `--note <原因>` | 否 | 收回原因，写进"当前进展"和通知消息 |
+
+发出的消息：
+
+```
+@Beta 任务「登录接口」（recZZZ）已收回，请停止处理，不要再更新它的状态
+原因：超过 2 小时无响应
+```
+
+输出：`{"ok": true, "data": {"task_id": "recZZZ", "previous_owner": "cli_xxx", "status": "待分配", "message_id": "om_xxx"}}`
+
+错误：`not_found`；`no_work_chat`；`not_dispatcher`；`task_done`；`not_assigned`。
 
 #### `muxboard status <任务ID> <状态>`
 
@@ -324,7 +380,7 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 
 ```
 @Jarvis 任务「实现登录接口」（recZZZ）已完成：接口已上线，测试通过
-请执行 muxboard show recZZZ 查看结果，并用 muxboard children recYYY 检查所有子任务的状态
+请执行 muxboard show recZZZ 查看结果，并用 muxboard children recYYY 检查所有子任务的状态，然后按调度规则派发下一个可派发任务（muxboard children recYYY --ready）
 ```
 
 输出：`{"ok": true, "data": {"task_id": "recZZZ", "status": "已完成", "notified": true}}`
@@ -348,12 +404,19 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 | 错误码 | 含义 |
 | --- | --- |
 | `not_in_botmux` | 缺少 botmux 注入的环境变量 |
+| `board_not_initialized` | 看板配置不存在，需要先在普通群里执行 `init` |
 | `not_found` | 任务不存在 |
 | `invalid_status` | 状态值不合法 |
 | `note_required` | 改成阻塞或已完成时缺少 `--note` |
 | `children_unfinished` | 还有未完成的子任务，不能设为已完成 |
 | `no_work_chat` | 找不到发消息的工作群 |
 | `bot_unresolved` | 在群成员里找不到目标 bot，无法 @ |
+| `already_assigned` | 子任务已派发或不是待分配，不能再 `assign` |
+| `deps_unfinished` | 子任务的依赖还没全部完成，不能 `assign` |
+| `bot_busy` | 目标 bot 正在处理其他任务，不能 `assign` |
+| `not_dispatcher` | 当前 bot 不是父任务的负责人，不能 `unassign` |
+| `task_done` | 子任务已完成，不能 `unassign` |
+| `not_assigned` | 子任务没有负责人，不需要 `unassign` |
 | `lark_error` | `lark-cli` 调用失败，`message` 里带原始错误 |
 | `invalid_args` | 命令或参数不合法，比如缺少必填参数、优先级不是高/中/低、对根任务执行 `split` |
 | `not_group_chat` | `init` 时当前会话不是普通群（单聊或话题群） |
@@ -373,6 +436,7 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 ### 6.4 实现
 
 - 看板读写：`lark-cli base +record-list`、`+record-get`、`+record-upsert`。
+- 新建看板：`lark-cli base +base-create`、`+table-list`、`+field-create`、`+field-list`、`+base-get`，授权用 `lark-cli drive +member-add`。
 - 建群：`lark-cli im +chat-create`，用 `--users` 拉人、`--description` 写群描述。
 - 拉 bot 入群：`lark-cli im chat.members create --member-id-type app_id`。
 - 读群信息（判断是否普通群）：`lark-cli im chats get`。
@@ -387,13 +451,15 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 | --- | --- |
 | `bin/muxboard` | 入口 |
 | `lib/cli.js` | 解析参数、检查环境变量、组装依赖、分发命令、输出 JSON |
-| `lib/commands/*.js` | 9 个命令，每个导出 `run(args, ctx)` |
-| `lib/board.js` | 看板读写：`getTask`、`listChildren`、`createTask`、`updateTask` |
+| `lib/commands/*.js` | 10 个命令，每个导出 `run(args, ctx)` |
+| `lib/board.js` | 看板读写：`getTask`、`listChildren`、`listByOwner`、`createTask`、`updateTask` |
 | `lib/chat.js` | 群操作：`create`、`getInfo`、`listMembers`、`addBots`、`send` |
-| `lib/lark.js` | 调用 `lark-cli`（自动加 `--as bot`），出错时抛 `lark_error` |
+| `lib/lark.js` | 调用 `lark-cli`（自动加 `--as bot`，不经过 botmux 托管入口时再加 `--profile <BOTMUX_LARK_APP_ID>`），出错时抛 `lark_error` |
 | `lib/workchat.js` | 工作群的群名、群描述格式、说明消息、@ 写法 |
 | `lib/args.js`、`errors.js`、`constants.js`、`progress.js`、`context.js` | 参数解析、错误码、状态常量、当前进展格式、命令依赖的类型定义 |
-| `config/board.json` | base token、table ID、字段 ID 映射 |
+| `lib/config.js` | 看板配置路径、读写，读取表结构模板 |
+| `lib/provision.js` | 按模板新建看板并给会话发起人授权 |
+| `config/board.json` | 表结构模板（字段名、类型、单选选项），不含 ID |
 | `skills/task-board/SKILL.md` | bot 的工作约定 |
 | `test/*.test.js` | 单元测试，`npm test` 运行 |
 
@@ -427,7 +493,8 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 
 统一用 bot 身份（`--as bot`），由执行命令的 bot 自己的身份读写看板和发消息。
 
-- **为什么 lark-cli 合适**：`muxboard` 不需要在一个进程里同时使用多个 bot 的身份。每个 bot 在自己的 botmux 会话里执行 `muxboard`，botmux 会自动把这个会话里的 `lark-cli` 绑定到当前 bot 的应用（`src/core/lark-tool-binding.ts`）。所以"用完成任务的 bot 的身份发消息"天然成立。需要时也可以用 `lark-cli --profile` 切换应用。
+- **为什么 lark-cli 合适**：`muxboard` 不需要在一个进程里同时使用多个 bot 的身份。每个 bot 在自己的 botmux 会话里执行 `muxboard`，botmux 会自动把这个会话里的 `lark-cli` 绑定到当前 bot 的应用（`src/core/lark-tool-binding.ts`）。所以"用完成任务的 bot 的身份发消息"天然成立。
+- **不经过托管入口时**：用 `MUXBOARD_LARK_BIN` 指定了其他 lark-cli，或会话里没有 `BOTMUX_LARK_TOOL_BINDING` 时，`lark.js` 每次调用加 `--profile <BOTMUX_LARK_APP_ID>`，按调用指定当前 bot，不修改 lark-cli 的全局默认 profile。对应 profile 不存在时直接报 `lark_error` 并提示用 `lark-cli profile add --name <app_id> --app-id <app_id> --app-secret-stdin` 添加，不回退到默认 profile，避免以别的 bot 的身份读写。
 - **为什么不用 `--as user`**：botmux 里的用户凭据绑定在触发这一轮的真人身上。bot 被另一个 bot 唤醒时没有真人，拿不到用户凭据（`docs/adr/dispatch-user-delegation.md` 第 7 条）。
 - **看板权限**：Jarvis（`cli_aad984231e385cc5`）、Beta（`cli_aa59a4113cf8dbf6`）、Zero（`cli_aa59a5723278dbfa`）三个 bot 都已加为看板的可编辑成员。Jarvis 已实测能写入，Beta 和 Zero 还没在真实会话里验证。
 - **其他权限**：Jarvis 已能建群、查群成员、发消息。其他 bot 缺少的 im 权限，实现时按报错逐个申请。

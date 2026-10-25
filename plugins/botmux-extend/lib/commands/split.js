@@ -40,7 +40,7 @@ export async function run(args, ctx) {
     userOpenIds,
   });
   await chat.addBots(chatId, botAppIds);
-  await board.updateTask(id, { work_chat_id: chatId });
+  await board.updateTask(id, { work_chat_id: chatId, hostname: env.hostname });
   await chat.send(chatId, introMessage({ taskId: id, taskTitle: t.title, upperChatId }));
   return { task_id: id, chat_id: chatId, chat_created: true, bots: botAppIds };
 }

@@ -35,7 +35,11 @@ export async function run(args, ctx) {
   // 先解析通知目标，再写看板，最后发消息：解析失败时看板不会被改。
   const target = notifies ? await resolveNotifyTarget(t, id, NOTIFY_LABEL[status], note, ctx) : null;
 
-  await ctx.board.updateTask(id, { status, progress: formatProgress(status, progressNote, ctx.now()) });
+  await ctx.board.updateTask(id, {
+    status,
+    progress: formatProgress(status, progressNote, ctx.now()),
+    hostname: ctx.env.hostname,
+  });
   if (target) {
     await ctx.chat.send(target.chatId, target.text);
   }
@@ -61,7 +65,8 @@ async function resolveNotifyTarget(t, id, label, note, ctx) {
       throw new MuxError(ErrorCode.BOT_UNRESOLVED, `无法在工作群中找到父任务负责人 ${parent.owner}`);
     }
     const text = `${mention(bot.open_id, bot.name ?? parent.owner)} 任务「${t.title}」（${id}）${label}：${note}\n` +
-      `请执行 muxboard show ${id} 查看结果，并用 muxboard children ${parent.task_id} 检查所有子任务的状态`;
+      `请执行 muxboard show ${id} 查看结果，并用 muxboard children ${parent.task_id} 检查所有子任务的状态，` +
+      `然后按调度规则派发下一个可派发任务（muxboard children ${parent.task_id} --ready）`;
     return { chatId, text };
   }
 

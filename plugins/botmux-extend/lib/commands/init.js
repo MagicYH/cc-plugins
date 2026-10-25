@@ -33,11 +33,19 @@ export async function run({ flags }, ctx) {
     owner: ctx.env.appId,
     progress: formatProgress(Status.IN_PROGRESS, '创建任务', ctx.now()),
     work_chat_id: chatId,
+    hostname: ctx.env.hostname,
   };
   if (dispatcherOpenId) patch.dispatcher_open_id = dispatcherOpenId;
 
-  const task_id = await ctx.board.createTask(patch);
-  return { task_id, chat_id: chatId };
+  // 还没有看板时，确认群合法后再新建，避免单聊等情况下白建一张表
+  let { board, boardUrl: url } = ctx;
+  if (!board) ({ board, url } = await ctx.provisionBoard());
+
+  const task_id = await board.createTask(patch);
+  if (url) {
+    await ctx.chat.send(chatId, `已创建根任务「${title}」（${task_id}），任务看板：${url}`);
+  }
+  return { task_id, chat_id: chatId, url };
 }
 
 async function assertNormalGroup(chatId, ctx) {

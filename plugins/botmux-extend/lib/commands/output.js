@@ -7,6 +7,6 @@ export async function run({ positionals }, ctx) {
   const id = requirePositional(positionals, 0, '任务ID');
   const content = requirePositional(positionals, 1, '内容');
   await ctx.board.getTask(id);
-  await ctx.board.updateTask(id, { output: content });
+  await ctx.board.updateTask(id, { output: content, hostname: ctx.env.hostname });
   return { task_id: id };
 }
