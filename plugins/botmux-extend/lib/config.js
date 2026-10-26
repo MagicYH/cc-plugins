@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { MuxError, ErrorCode } from './errors.js';
 
 /**
  * @typedef {Object} BoardConfig
@@ -41,4 +42,20 @@ export function writeBoardConfig(path, config) {
 export function loadBoardTemplate() {
   const path = fileURLToPath(new URL('../config/board.json', import.meta.url));
   return JSON.parse(readFileSync(path, 'utf8'));
+}
+
+/**
+ * 用户配置必须包含模板里的全部字段，缺了就报错并给出补法。纯本地比对，不调接口。
+ * @param {BoardConfig} config
+ * @param {BoardTemplate} template
+ * @param {string} path 用户配置路径，写进提示里
+ */
+export function checkBoardConfig(config, template, path) {
+  const missing = Object.keys(template.fields).filter((key) => !config.fields?.[key]);
+  if (!missing.length) return;
+  const list = missing.map((key) => `${key}（「${template.fields[key].name}」，类型 ${template.fields[key].type}）`).join('、');
+  throw new MuxError(
+    ErrorCode.BOARD_CONFIG_INCOMPLETE,
+    `看板配置缺少字段：${list}。请在看板表中按插件模板 config/board.json 新建这些字段，再把字段 ID 写入 ${path} 的 fields.<逻辑名>`,
+  );
 }

@@ -150,18 +150,6 @@ test('hostname：配置里有该字段时按文本读写', async () => {
   assert.deepEqual(calls[1].slice(-2), ['--json', '{"fld_status":["进行中"],"fld_host":"host-a"}']);
 });
 
-test('hostname：旧配置没有该字段时跳过写入，读取为 null', async () => {
-  const { run, calls } = fakeRunner([
-    { updated: true },
-    { data: [['A']], field_id_list: ['fld_title'], record_id_list: ['recT'] },
-  ]);
-  const board = createBoard(run, config);
-
-  await board.updateTask('recT', { output: '完成', hostname: 'host-a' });
-  assert.deepEqual(calls[0].slice(-2), ['--json', '{"fld_output":"完成"}']);
-  assert.equal((await board.getTask('recT')).hostname, null);
-});
-
 test('deps：读为任务 ID 数组，写入为引用数组', async () => {
   const withDeps = { ...config, fields: { ...config.fields, deps: 'fld_deps' } };
   const { run, calls } = fakeRunner([
@@ -175,18 +163,6 @@ test('deps：读为任务 ID 数组，写入为引用数组', async () => {
   assert.deepEqual(u.deps, []);
   await board.createTask({ title: 'x', deps: ['recA'] });
   assert.deepEqual(calls[1].slice(-2), ['--json', '{"fld_title":"x","fld_deps":[{"id":"recA"}]}']);
-});
-
-test('deps：旧配置没有该字段时跳过写入，读取为 []', async () => {
-  const { run, calls } = fakeRunner([
-    { updated: true },
-    { data: [['A']], field_id_list: ['fld_title'], record_id_list: ['recT'] },
-  ]);
-  const board = createBoard(run, config);
-
-  await board.updateTask('recT', { title: 'A', deps: ['recA'] });
-  assert.deepEqual(calls[0].slice(-2), ['--json', '{"fld_title":"A"}']);
-  assert.deepEqual((await board.getTask('recT')).deps, []);
 });
 
 test('listByOwner 按负责人精确过滤，可加状态条件', async () => {

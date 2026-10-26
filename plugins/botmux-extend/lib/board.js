@@ -136,14 +136,12 @@ export function createBoard(run, config) {
   };
 
   // TaskPatch → 字段ID→单元格值，只包含 patch 里出现的键。
-  // 配置里没有的字段（旧配置缺 hostname、deps）直接跳过，不写入。
   function patchToCells(patch) {
     const cells = {};
     for (const [key, value] of Object.entries(patch)) {
       const writer = WRITERS[key];
       if (!writer) continue;
       const [name, format] = writer;
-      if (!fields[name]) continue;
       cells[fields[name]] = format(value);
     }
     return cells;

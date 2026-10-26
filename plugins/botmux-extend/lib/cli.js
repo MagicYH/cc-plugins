@@ -4,7 +4,7 @@ import { MuxError, ErrorCode } from './errors.js';
 import { createLarkRunner } from './lark.js';
 import { createBoard } from './board.js';
 import { createChat } from './chat.js';
-import { boardConfigPath, readBoardConfig, writeBoardConfig, loadBoardTemplate } from './config.js';
+import { boardConfigPath, readBoardConfig, writeBoardConfig, loadBoardTemplate, checkBoardConfig } from './config.js';
 import { provisionBoard } from './provision.js';
 
 const COMMANDS = ['init', 'show', 'start', 'children', 'add', 'split', 'assign', 'unassign', 'status', 'output'];
@@ -50,6 +50,7 @@ export async function main(argv, env = process.env) {
     if (!config && command !== 'init') {
       throw new MuxError(ErrorCode.BOARD_NOT_INITIALIZED, `看板未初始化（找不到 ${configPath}），请先在普通群里执行 muxboard init`);
     }
+    if (config) checkBoardConfig(config, loadBoardTemplate(), configPath);
     const run = createLarkRunner();
     const ctx = {
       board: config ? createBoard(run, config) : null,

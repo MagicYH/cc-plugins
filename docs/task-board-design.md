@@ -46,8 +46,8 @@ CLI 内部用字段 ID 读写，不用字段名。字段名可以改，ID 不变
 | 产出 | `fldgNsHCoP` | 文本 | 暂保留为文本，后续改为附件 |
 | 修改时间 | `fldZfhlB8N` | 修改时间 | 系统自动维护，用来发现长时间没有更新的任务 |
 | 派发人 | `fldEuP2QPm` | 人员 | 只有根任务填，是派发任务的人；根任务完成时 @ 这个人 |
-| 主机 | `fld7ju2EnA` | 文本 | 负责人 bot 最近一次操作该任务时所在的主机（`os.hostname()`），多 bot 跨主机协作时用来定位。`init`、`start`、`split`、`status`、`output` 写入；`add`、`assign` 由父任务的 bot 执行，不写。旧配置里没有这个字段时跳过写入，读出为 null |
-| 依赖 | `fldxiyUgLK` | 关联（单向，可多选） | 同一父任务下必须先完成的任务，`add --deps` 写入。依赖全部完成后才能 `assign`。旧配置里没有这个字段时按没有依赖处理，写入时跳过 |
+| 主机 | `fld7ju2EnA` | 文本 | 负责人 bot 最近一次操作该任务时所在的主机（`os.hostname()`），多 bot 跨主机协作时用来定位。`init`、`start`、`split`、`status`、`output` 写入；`add`、`assign` 由父任务的 bot 执行，不写 |
+| 依赖 | `fldxiyUgLK` | 关联（单向，可多选） | 同一父任务下必须先完成的任务，`add --deps` 写入。依赖全部完成后才能 `assign` |
 
 ## 3. 任务状态
 
@@ -140,7 +140,7 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 | `BOTMUX_CHAT_ID` | botmux 注入 | 当前群 ID，`init` 时作为根群 |
 | `BOTMUX_CHAT_TYPE` | botmux 注入 | 当前会话类型（`group` / `p2p`），`init` 时为 `p2p` 直接拒绝 |
 | `lark-cli` | 本机已安装 | 读写看板、建群、查群成员、发消息，统一 `--as bot` |
-| 看板配置 | `~/.config/muxboard/board.json`，`MUXBOARD_CONFIG` 可覆盖 | base token、table ID、字段 ID 映射、表格链接。缺失时只有 `init` 能执行，其他命令返回 `board_not_initialized` |
+| 看板配置 | `~/.config/muxboard/board.json`，`MUXBOARD_CONFIG` 可覆盖 | base token、table ID、字段 ID 映射、表格链接。缺失时只有 `init` 能执行，其他命令返回 `board_not_initialized`；存在但缺少模板里的字段时，所有命令返回 `board_config_incomplete` |
 | 表结构模板 | 插件自带 `config/board.json` | 新建看板时的字段名、类型和单选选项，不含 ID |
 
 缺少环境变量时，所有命令返回错误 `not_in_botmux`。
@@ -405,6 +405,7 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 | --- | --- |
 | `not_in_botmux` | 缺少 botmux 注入的环境变量 |
 | `board_not_initialized` | 看板配置不存在，需要先在普通群里执行 `init` |
+| `board_config_incomplete` | 看板配置缺少插件模板里的字段（如旧配置没有「主机」「依赖」），消息列出缺失字段及补法：在看板表中按模板新建字段，把字段 ID 写入配置 |
 | `not_found` | 任务不存在 |
 | `invalid_status` | 状态值不合法 |
 | `note_required` | 改成阻塞或已完成时缺少 `--note` |
@@ -457,7 +458,7 @@ botmux 按"群 + bot"区分会话。执行 `split` 的 bot 是在上级群里做
 | `lib/lark.js` | 调用 `lark-cli`（自动加 `--as bot`，不经过 botmux 托管入口时再加 `--profile <BOTMUX_LARK_APP_ID>`），出错时抛 `lark_error` |
 | `lib/workchat.js` | 工作群的群名、群描述格式、说明消息、@ 写法 |
 | `lib/args.js`、`errors.js`、`constants.js`、`progress.js`、`context.js` | 参数解析、错误码、状态常量、当前进展格式、命令依赖的类型定义 |
-| `lib/config.js` | 看板配置路径、读写，读取表结构模板 |
+| `lib/config.js` | 看板配置路径、读写，读取表结构模板，校验配置字段是否齐全 |
 | `lib/provision.js` | 按模板新建看板并给会话发起人授权 |
 | `config/board.json` | 表结构模板（字段名、类型、单选选项），不含 ID |
 | `skills/task-board/SKILL.md` | bot 的工作约定 |

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, chmodSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
-import { boardConfigPath, readBoardConfig, writeBoardConfig, loadBoardTemplate } from '../lib/config.js';
+import { boardConfigPath, readBoardConfig, writeBoardConfig, loadBoardTemplate, checkBoardConfig } from '../lib/config.js';
 import { provisionBoard } from '../lib/provision.js';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -117,10 +117,41 @@ test('cli 看板配置缺失时，init 以外的命令报 board_not_initialized'
   assert.match(out.error.message, /muxboard init/);
 });
 
+/** 模板里每个字段都配上一个假的字段 ID。 */
+function fullFields() {
+  return Object.fromEntries(Object.keys(loadBoardTemplate().fields).map((key) => [key, `fld_${key}`]));
+}
+
+test('checkBoardConfig 配置齐全时通过，缺字段时报 board_config_incomplete 并给出补法', () => {
+  const template = loadBoardTemplate();
+  assert.doesNotThrow(() => checkBoardConfig({ fields: fullFields() }, template, '/x/board.json'));
+
+  const { hostname, deps, ...rest } = fullFields();
+  assert.throws(() => checkBoardConfig({ fields: rest }, template, '/x/board.json'), (err) => {
+    assert.equal(err.code, 'board_config_incomplete');
+    assert.match(err.message, /hostname（「主机」，类型 text）/);
+    assert.match(err.message, /deps（「依赖」，类型 link）/);
+    assert.match(err.message, /\/x\/board\.json 的 fields\.<逻辑名>/);
+    return true;
+  });
+});
+
+test('cli 看板配置缺字段时报 board_config_incomplete，不调用 lark-cli', async () => {
+  const path = join(tmp(), 'board.json');
+  const { deps, ...fields } = fullFields();
+  writeBoardConfig(path, { base_token: 'basCfg', table_id: 'tblCfg', fields, url: 'u' });
+  const { code, out } = await runCli(['show', 'recA'], {
+    BOTMUX_LARK_APP_ID: 'cli_self', MUXBOARD_CONFIG: path, MUXBOARD_LARK_BIN: '/nonexistent/lark-cli',
+  });
+  assert.equal(code, 1);
+  assert.equal(out.error.code, 'board_config_incomplete');
+  assert.match(out.error.message, /deps（「依赖」/);
+});
+
 test('cli 看板配置存在时直接使用其中的 base 和数据表', async () => {
   const dir = tmp();
   const path = join(dir, 'board.json');
-  writeBoardConfig(path, { base_token: 'basCfg', table_id: 'tblCfg', fields: { title: 'fldT' }, url: 'u' });
+  writeBoardConfig(path, { base_token: 'basCfg', table_id: 'tblCfg', fields: { ...fullFields(), title: 'fldT' }, url: 'u' });
   // 假的 lark-cli：记录参数，返回一条只有标题的记录
   const bin = join(dir, 'lark-cli');
   const log = join(dir, 'args.json');
